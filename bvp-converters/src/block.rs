@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use tinyjson::JsonValue;
 
-use crate::{placement::Placement, formats::Format, vector3::Vector3};
+use crate::{placement::Placement, formats::Format, vector3::Vector3, json_aux::{get_u32_from_json, get_string_from_json}, bvpfile::File};
 
 pub struct Block {
     pub dimensions: Vector3<u32>,
@@ -25,11 +25,13 @@ impl Block {
         }
     }
 
-    pub fn _set_data_in_range(&mut self, offset: Vector3<u32>, block: Block, format: &Format) -> Result<(), String> {
+    pub fn set_data_in_range(&mut self, offset: Vector3<u32>, block: &Block, format: &Format) -> Result<(), String> {
         let start = offset;
         let end = offset + block.dimensions;
         let extent = end - start;
-
+        if self.data.is_none() {
+            return Err("Target block does not have data".to_string());
+        }
         if self.format != block.format {
             return Err("Formats of the blocks do not match".to_string());
         }
@@ -60,7 +62,7 @@ impl Block {
             Some(v) => v,
             None => return Err("Block does not have data".to_string()),
         };
-        let mut dest_bytes = Vec::new();
+        let dest_bytes = self.data.as_mut().unwrap();
 
         for x in 0..microblock_amount_in_range.x {
             for y in 0..microblock_amount_in_range.y {
@@ -78,9 +80,6 @@ impl Block {
                 }
             }
         }
-
-        self.data = Some(dest_bytes);
-
         return Ok(());
     }
 
@@ -161,6 +160,24 @@ impl Block {
         return hm;
     }
 
+    pub fn is_equal_data(&self, vec: &Vec<u8>) -> bool {
+        if self.data.is_none() {
+            return false;
+        }
+        let data = self.data.as_ref().unwrap();
+        if data.len() != vec.len() {
+            return false;
+        }
+
+        for i in 0..data.len() {
+            if data[i] != vec[i] {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     pub fn _to_string(&self) -> String {
         let dims = self.dimensions;
         let plc = self.placements.len();
@@ -169,5 +186,63 @@ impl Block {
             data = self.data.as_ref().unwrap().len();
         }
         return format!("Block: dims {}, plc {}, data {}", dims, plc, data);
+    }
+
+    // This here is probably not optimal...
+    pub fn from_json(j: &JsonValue, files: &Vec<File>) -> Result<Self, String> {
+        match j {
+            JsonValue::Object(o) => {
+                let dimensions = Vector3::<u32>::from_json(&o["dimensions"])?;
+                let mut placements = Vec::new();
+                match &o["placements"] {
+                    JsonValue::Array(a) => {
+                        for el in a {
+                            placements.push(Placement::from_json(&el)?);
+                        }
+                    },
+                    _ => {
+                        return Err("Invalid JSON".to_string());
+                    }
+                };
+                let mut block = Block {
+                    dimensions,
+                    placements,
+                    format: None,
+                    data: None,
+                    data_url: None,
+                    encoding: None
+                };
+
+                match o.get("format") {
+                    Some(f) => {
+                        let format = get_u32_from_json(f)? as usize;
+                        block.format = Some(format);
+                    },
+                    None => ()
+                }
+
+                match o.get("data") {
+                    Some(d) => {
+                        let data_url = get_string_from_json(d)?;
+                        // This is technically required by specification... TODO: Implement!
+                        //let encoding = get_string_from_json(&o["encoding"])?;
+                        
+                        for file in files {
+                            if file.name == data_url {
+                                let data = file.data.to_vec();
+                                block.data_url = Some(data_url);
+                                //block.encoding = Some(encoding);
+                                block.data = Some(data);
+                                break;
+                            }
+                        }
+                    },
+                    None => ()
+                }
+                return Ok(block);
+            },
+            _ => ()
+        }
+        return Err("Not a valid JSON".to_string());
     }
 }

@@ -1,8 +1,8 @@
-use std::{collections::HashMap, rc::Rc, fs, path::Path};
+use std::{collections::HashMap, rc::Rc, fs, path::Path, str::FromStr};
 
 use tinyjson::{JsonValue};
 
-use crate::{block::Block, formats::Format, vector3::Vector3};
+use crate::{block::Block, formats::Format, vector3::Vector3, json_aux::{get_string_from_json, get_u32_from_json}};
 
 pub struct Asset {
     version: String
@@ -14,14 +14,26 @@ impl Asset {
         hm.insert("version".to_string(), self.version.clone().into());
         return hm;
     }
+
+    pub fn from_json(j: &JsonValue) -> Result<Self, String> {
+        let hashmap = match j {
+            JsonValue::Object(o) => o,
+            _ => {
+                return Err("Invalid JSON".to_string());
+            }
+        };
+        let version = get_string_from_json(&hashmap["version"])?;
+        let asset = Asset { version };
+        return Ok(asset);
+    }
 }
 
 pub struct Modality {
-    name: Option<String>,
+    pub name: Option<String>,
     description: Option<String>,
     semantic_type: Option<String>,
     scale: Vector3<f32>,
-    block: usize
+    pub block: usize
 }
 
 impl Modality {
@@ -43,6 +55,20 @@ impl Modality {
         hm.insert("scale".to_string(), self.scale.to_vec().into());
         hm.insert("block".to_string(), (self.block as f64).into());
         return hm;
+    }
+
+    pub fn from_json(j: &JsonValue) -> Result<Self, String> {
+        let hashmap = match j {
+            JsonValue::Object(o) => o,
+            _ => {
+                return Err("Invalid JSON".to_string());
+            }
+        };
+
+        let scale = Vector3::<f32>::from_json(&hashmap["scale"])?;
+        let block = get_u32_from_json(&hashmap["block"])? as usize;
+
+        return Ok(Self::new(None, None, None, scale, block));
     }
 }
 
@@ -134,5 +160,67 @@ impl BVPFile {
             },
         };
         return Ok(content.into_bytes());
+    }
+
+    pub fn from_manifest(manifest_content: &str, files: &Vec<File>) -> Result<Self, String> {
+        let mut state = BVPFile::new();
+        let json = match JsonValue::from_str(manifest_content) {
+            Ok(j) => match j {
+                JsonValue::Object(o) => o,
+                _ => {
+                    return Err("Invalid JSON in manifest".to_string());
+                }
+            },
+            Err(_) => {
+                return Err("Invalid JSON in manifest".to_string());
+            },
+        };
+
+        state.asset = Asset::from_json(&json["asset"])?;
+
+        match &json["modalities"] {
+            JsonValue::Array(a) => {
+                for el in a {
+                    let modality = Modality::from_json(&el)?;
+                    state.modalities.push(modality);
+                }
+            },
+            _ => ()
+        };
+        match &json["blocks"] {
+            JsonValue::Array(a) => {
+                for el in a {
+                    let block = Block::from_json(&el, files)?;
+                    state.blocks.push(block);
+                }
+            },
+            _ => {
+                return Err("Invalid JSON in manifest".to_string());
+            }
+        };
+        match &json["modalities"] {
+            JsonValue::Array(a) => {
+                for el in a {
+                    let modality = Modality::from_json(&el)?;
+                    state.modalities.push(modality);
+                }
+            },
+            _ => {
+                return Err("Invalid JSON in manifest".to_string());
+            }
+        };
+        match &json["formats"] {
+            JsonValue::Array(a) => {
+                for el in a {
+                    let format = Format::from_json(&el)?;
+                    state.formats.push(format);
+                }
+            },
+            _ => {
+                return Err("Invalid JSON in manifest".to_string());
+            }
+        };
+
+        return Ok(state);
     }
 }

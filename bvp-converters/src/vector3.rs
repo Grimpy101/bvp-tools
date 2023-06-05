@@ -46,6 +46,46 @@ impl Vector3<u32> {
     pub fn multiply_elements(&self) -> u32 {
         return self.x * self.y * self.z;
     }
+
+    pub fn from_json(j: &JsonValue) -> Result<Self, String> {
+        match j {
+            JsonValue::Array(a) => {
+                if a.len() != 3 {
+                    return Err("Invalid JSON".to_string());
+                }
+                let x = match a[0] {
+                    JsonValue::Number(n) => {
+                        n as u32
+                    },
+                    _ => {
+                        return Err("Invalid JSON".to_string());
+                    }
+                };
+                let y = match a[1] {
+                    JsonValue::Number(n) => {
+                        n as u32
+                    },
+                    _ => {
+                        return Err("Invalid JSON".to_string());
+                    }
+                };
+                let z = match a[2] {
+                    JsonValue::Number(n) => {
+                        n as u32
+                    },
+                    _ => {
+                        return Err("Invalid JSON".to_string());
+                    }
+                };
+
+                let vec = Vector3::from_xyz(x, y, z);
+
+                return Ok(vec);
+            },
+            _ => ()
+        }
+        return Err("Invalid JSON".to_string());
+    }
 }
 
 impl Vector3<f32> {
@@ -67,6 +107,46 @@ impl Vector3<f32> {
 
     pub fn to_vec(&self) -> Vec<JsonValue> {
         return vec![(self.x as f64).into(), (self.y as f64).into(), (self.z as f64).into()];
+    }
+
+    pub fn from_json(j: &JsonValue) -> Result<Self, String> {
+        match j {
+            JsonValue::Array(a) => {
+                if a.len() != 3 {
+                    return Err("Invalid JSON".to_string());
+                }
+                let x = match a[0] {
+                    JsonValue::Number(n) => {
+                        n as f32
+                    },
+                    _ => {
+                        return Err("Invalid JSON".to_string());
+                    }
+                };
+                let y = match a[1] {
+                    JsonValue::Number(n) => {
+                        n as f32
+                    },
+                    _ => {
+                        return Err("Invalid JSON".to_string());
+                    }
+                };
+                let z = match a[2] {
+                    JsonValue::Number(n) => {
+                        n as f32
+                    },
+                    _ => {
+                        return Err("Invalid JSON".to_string());
+                    }
+                };
+
+                let vec = Vector3 { x, y, z };
+
+                return Ok(vec);
+            },
+            _ => ()
+        }
+        return Err("Invalid JSON".to_string());
     }
 }
 

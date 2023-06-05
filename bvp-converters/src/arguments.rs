@@ -2,7 +2,7 @@ use std::{fs};
 
 use tinyjson::JsonValue;
 
-use crate::{vector3::Vector3, formats::{Format, MonoFormat, PrimitiveType, FormatFamily}};
+use crate::{vector3::Vector3, formats::{Format}, json_aux};
 /*
 pub enum ArgType {
     String(String),
@@ -240,68 +240,6 @@ pub struct Parameters {
     pub input_format: Format
 }
 
-pub fn get_u32_from_json(j: &JsonValue) -> Result<u32, String> {
-    match j {
-        JsonValue::Number(n) => {
-            return Ok(*n as u32);
-        },
-        _ => {
-            return Err("JSON parsing error: Not a number".to_string());
-        }
-    };
-}
-
-pub fn get_u32_dimensions_from_json(j: &JsonValue) -> Result<Vector3<u32>, String> {
-    match j {
-        JsonValue::Array(a) => {
-            let x = get_u32_from_json(&a[0])?;
-            let y = get_u32_from_json(&a[1])?;
-            let z = get_u32_from_json(&a[2])?;
-            return Ok(Vector3::from_xyz(x, y, z));
-        },
-        _ => {
-            return Err("JSON parsing error: Not an array".to_string());
-        }
-    }
-}
-
-pub fn get_string_from_json(j: &JsonValue) -> Result<String, String> {
-    match j {
-        JsonValue::String(s) => {
-            return Ok(s.clone());
-        },
-        _ => {
-            return Err("JSON parsing error: Not a string".to_string());
-        }
-    }
-}
-
-pub fn get_format_from_json(j: &JsonValue) -> Result<Format, String> {
-    match j {
-        JsonValue::Object(o) => {
-            let family = get_string_from_json(&o["family"])?;
-
-            match family.as_str() {
-                "mono" => {
-                    let count = get_u32_from_json(&o["count"])?;
-                    let size = get_u32_from_json(&o["size"])?;
-                    let tp = get_string_from_json(&o["type"])?;
-                    let prim = PrimitiveType::from_str(tp)?;
-                    let mono = MonoFormat::new(count, size, prim);
-                    let mono_family = FormatFamily::Mono(mono);
-                    return Ok(Format::new(Vector3::from_xyz(1, 1, 1), count * size, mono_family));
-                },
-                _ => {
-                    return Err("Format family not supported".to_string());
-                }
-            };
-        },
-        _ => {
-            return Err("JSON parsing error: Not an object".to_string());
-        }
-    }
-}
-
 pub fn parse_config(filepath: &str) -> Result<Parameters, String> {
     let contents = match fs::read_to_string(filepath) {
         Ok(c) => c,
@@ -317,11 +255,11 @@ pub fn parse_config(filepath: &str) -> Result<Parameters, String> {
         },
     };
 
-    let input_file = get_string_from_json(&json["inputFile"])?;
-    let output_file = get_string_from_json(&json["outputFile"])?;
-    let dimensions = get_u32_dimensions_from_json(&json["dimensions"])?;
-    let block_dimensions = get_u32_dimensions_from_json(&json["blockDimensions"])?;
-    let input_format = get_format_from_json(&json["format"])?;
+    let input_file = json_aux::get_string_from_json(&json["inputFile"])?;
+    let output_file = json_aux::get_string_from_json(&json["outputFile"])?;
+    let dimensions = json_aux::get_u32_dimensions_from_json(&json["dimensions"])?;
+    let block_dimensions = json_aux::get_u32_dimensions_from_json(&json["blockDimensions"])?;
+    let input_format = Format::from_json(&json["format"])?;
 
     let arguments = Parameters {
         input_file,

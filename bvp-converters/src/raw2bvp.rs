@@ -15,12 +15,23 @@ mod bvpfile;
 mod aux;
 mod vector3;
 mod archives;
+mod compression;
+mod json_aux;
 
 
+/// Iterates through blocks of data in volume,
+/// schedules unique data for writing to file,
+/// and reference data through placements
+/// 
+/// * `parent_block_i` is an index to parent block in vector *bvp_state.blocks*
+/// * `dimensions` are dimenisons of volume / parent block
+/// * `block_dimensions` are dimensions of blocks inside the parent block
+/// * `format_i` is an index to a format in vector *bvp_state.formats*
+/// * `bvp_state` is a state tracking object for single BVP file
 fn volume2block(parent_block_i: usize, dimensions: Vector3<u32>, block_dimensions: Vector3<u32>, format_i: usize, bvp_state: &mut BVPFile) -> Result<(), String> {
     let block_count = (dimensions / block_dimensions).ceil();
     let format = &bvp_state.formats[format_i];
-    
+
     for x in 0..block_count.x {
         for y in 0..block_count.y {
             for z in 0..block_count.z {
@@ -36,21 +47,35 @@ fn volume2block(parent_block_i: usize, dimensions: Vector3<u32>, block_dimension
                 };
                 let block_hash = xxh3_64(&block_data[..]);
 
+                // Check if block with the same data exists.
+                // If it does, point to that block through placement,
+                // else schedule block for writing to file and store its index
+                let exists;
                 match bvp_state.block_map.get(&block_hash) {
                     Some(block_id) => {
-                        bvp_state.blocks[0].placements.push(Placement::new(block_start, block_id.clone()));
+                        let hashed_block = &bvp_state.blocks[*block_id];
+                        if hashed_block.is_equal_data(&block_data) {
+                            exists = false;
+                        } else {
+                            bvp_state.blocks[0].placements.push(Placement::new(block_start, block_id.clone()));
+                            exists = true;
+                        }
                     },
                     None => {
-                        let block_id = bvp_state.blocks.len();
-                        let block_url = format!("blocks/block_{}.raw", block_id);
-                        bvp_state.block_map.insert(block_hash, block_id);
-                        let mut new_block = Block::new(block.dimensions, Some(format_i), None);
-                        new_block.format = bvp_state.blocks[parent_block_i].format;
-                        new_block.data_url = Some(block_url.clone());
-                        bvp_state.blocks.push(new_block);
-                        bvp_state.files.push(File::new(block_url, Rc::new(block_data), None));
+                        exists = false;
                     }
                 };
+
+                if !exists {
+                    let block_id = bvp_state.blocks.len();
+                    let block_url = format!("blocks/block_{}.raw", block_id);
+                    bvp_state.block_map.insert(block_hash, block_id);
+                    let mut new_block = Block::new(block.dimensions, Some(format_i), None);
+                    new_block.format = bvp_state.blocks[parent_block_i].format;
+                    new_block.data_url = Some(block_url.clone());
+                    bvp_state.blocks.push(new_block);
+                    bvp_state.files.push(File::new(block_url, Rc::new(block_data), None));
+                }
             }
         }
     }
@@ -74,6 +99,7 @@ fn main() -> Result<(), String> {
     if arguments.len() < 2 {
         return Err("Missing JSON config file".to_string());
     }
+
     let config_filepath = &arguments[1];
     let parameters = arguments::parse_config(&config_filepath)?;
     let input_data = read_input_file(&parameters.input_file)?;
@@ -82,12 +108,17 @@ fn main() -> Result<(), String> {
     let scale = Vector3 { x: 1.0, y: 1.0, z: 1.0 };
     bvp_file.modalities.push(Modality::new(None, None, None, scale, 0));
 
+    // Create volume root block to populate with smaller blocks
     let parent_block = Block::new(parameters.dimensions, Some(0), Some(input_data));
     bvp_file.blocks.push(parent_block);
     
     volume2block(0, parameters.dimensions, parameters.block_dimensions, 0, &mut bvp_file)?;
     
     bvp_file.files.push(File::new("manifest.json".to_string(), Rc::new(bvp_file.to_manifest()?), Some("application/json".to_string())));
+    
+    for file in &bvp_file.files {
+        file._write()?;
+    }
 
     let saf = to_saf_archive(&bvp_file.files)?;
     match fs::write(parameters.output_file, saf) {

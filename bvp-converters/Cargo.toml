@@ -9,6 +9,10 @@ edition = "2021"
 name = "raw2bvp"
 path = "src/raw2bvp.rs"
 
+[[bin]]
+name = "bvp2raw"
+path = "src/bvp2raw.rs"
+
 [dependencies]
 tinyjson = "2.5.1"
 xxhash-rust = { version = "0.8.6", features = ["xxh3"] }

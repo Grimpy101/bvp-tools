@@ -2,7 +2,7 @@ use std::{collections::HashMap};
 
 use tinyjson::JsonValue;
 
-use crate::vector3::Vector3;
+use crate::{vector3::Vector3, json_aux::{get_string_from_json, get_u32_from_json}};
 
 pub enum PrimitiveType {
     Int,
@@ -80,5 +80,31 @@ impl Format {
         let microblock_amount_vec = (dimensions / self.microblock_dimensions).to_u32();
         let microblock_amount = microblock_amount_vec.multiply_elements();
         return self.count_microblocks(microblock_amount);
+    }
+
+    pub fn from_json(j: &JsonValue) -> Result<Self, String> {
+        match j {
+            JsonValue::Object(o) => {
+                let family = get_string_from_json(&o["family"])?;
+    
+                match family.as_str() {
+                    "mono" => {
+                        let count = get_u32_from_json(&o["count"])?;
+                        let size = get_u32_from_json(&o["size"])?;
+                        let tp = get_string_from_json(&o["type"])?;
+                        let prim = PrimitiveType::from_str(tp)?;
+                        let mono = MonoFormat::new(count, size, prim);
+                        let mono_family = FormatFamily::Mono(mono);
+                        return Ok(Format::new(Vector3::from_xyz(1, 1, 1), count * size, mono_family));
+                    },
+                    _ => {
+                        return Err("Format family not supported".to_string());
+                    }
+                };
+            },
+            _ => {
+                return Err("JSON parsing error: Not an object".to_string());
+            }
+        }
     }
 }
