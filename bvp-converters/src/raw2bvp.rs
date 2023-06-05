@@ -67,7 +67,6 @@ fn volume2block(parent_block_i: usize, dimensions: Vector3<u32>, block_dimension
                     }
                 };
 
-                println!("{}", block_data.len());
                 if !exists {
                     block_id = bvp_state.blocks.len();
                     let block_url = format!("blocks/block_{}.raw", block_id);
@@ -120,17 +119,28 @@ fn main() -> Result<(), String> {
     
     bvp_file.files.push(File::new("manifest.json".to_string(), Rc::new(bvp_file.to_manifest()?), Some("application/json".to_string())));
     
-    for file in &bvp_file.files {
-        file._write()?;
-    }
-
-    let saf = to_saf_archive(&bvp_file.files)?;
-    match fs::write(parameters.output_file, saf) {
-        Ok(_) => (),
-        Err(e) => {
-            return Err(format!("Error outputing file: {}", e));
+    match &parameters.archive {
+        archives::ArchiveEnum::SAF => {
+            let saf = to_saf_archive(&bvp_file.files)?;
+            match fs::write(parameters.output_file, saf) {
+                Ok(_) => (),
+                Err(e) => {
+                    return Err(format!("Error outputing file: {}", e));
+                }
+            };
+        },
+        archives::ArchiveEnum::None => {
+            for file in &bvp_file.files {
+                file.write()?;
+            }
+        },
+        _ => {
+            println!("Not supported, exporting as raw files...");
+            for file in &bvp_file.files {
+                file.write()?;
+            }
         }
-    };
+    }
 
     return Ok(());
 }

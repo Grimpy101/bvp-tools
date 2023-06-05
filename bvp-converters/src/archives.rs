@@ -4,6 +4,11 @@ use tinyjson::JsonValue;
 
 use crate::{bvpfile::File, json_aux};
 
+pub enum ArchiveEnum {
+    SAF,
+    None
+}
+
 const SAF_SIGNATURE: [u8; 12] = [0xab, 0x53, 0x41, 0x46, 0x20, 0x31, 0x30, 0xbb, 0x0d, 0x0a, 0x1a, 0x0a];
 
 pub fn fill_bytes_from_usize(mut bytes: &mut [u8], n: u32) -> Result<(), String> {

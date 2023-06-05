@@ -83,7 +83,7 @@ impl File {
         return Self { name, data, mime };
     }
 
-    pub fn _write(&self) -> Result<(), String> {
+    pub fn write(&self) -> Result<(), String> {
         let path = Path::new(&self.name);
         let prefix = path.parent().unwrap();
         match fs::create_dir_all(prefix) {

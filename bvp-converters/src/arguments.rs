@@ -1,8 +1,8 @@
-use std::{fs};
+use std::{fs, collections::HashMap};
 
 use tinyjson::JsonValue;
 
-use crate::{vector3::Vector3, formats::{Format}, json_aux};
+use crate::{vector3::Vector3, formats::{Format}, json_aux, archives::ArchiveEnum};
 /*
 pub enum ArgType {
     String(String),
@@ -237,7 +237,8 @@ pub struct Parameters {
     pub output_file: String,
     pub dimensions: Vector3<u32>,
     pub block_dimensions: Vector3<u32>,
-    pub input_format: Format
+    pub input_format: Format,
+    pub archive: ArchiveEnum
 }
 
 pub fn parse_config(filepath: &str) -> Result<Parameters, String> {
@@ -254,19 +255,39 @@ pub fn parse_config(filepath: &str) -> Result<Parameters, String> {
             return Err(format!("Could not read JSON: {}", e));
         },
     };
+    let hashmap: HashMap<_, _> = match json.try_into() {
+        Ok(h) => h,
+        Err(_) => {
+            return Err("Not valid JSON".to_string());
+        }
+    };
 
-    let input_file = json_aux::get_string_from_json(&json["inputFile"])?;
-    let output_file = json_aux::get_string_from_json(&json["outputFile"])?;
-    let dimensions = json_aux::get_u32_dimensions_from_json(&json["dimensions"])?;
-    let block_dimensions = json_aux::get_u32_dimensions_from_json(&json["blockDimensions"])?;
-    let input_format = Format::from_json(&json["format"])?;
+    let input_file = json_aux::get_string_from_json(&hashmap["inputFile"])?;
+    let output_file = json_aux::get_string_from_json(&hashmap["outputFile"])?;
+    let dimensions = json_aux::get_u32_dimensions_from_json(&hashmap["dimensions"])?;
+    let block_dimensions = json_aux::get_u32_dimensions_from_json(&hashmap["blockDimensions"])?;
+    let input_format = Format::from_json(&hashmap["format"])?;
+    let archive = match hashmap.get("archive") {
+        Some(s) => {
+            let s = json_aux::get_string_from_json(s)?;
+            match s.as_str() {
+                "SAF" => ArchiveEnum::SAF,
+                "None" => ArchiveEnum::None,
+                _ => {
+                    return Err("Archive format not supported".to_string());
+                }
+            }
+        },
+        None => ArchiveEnum::None
+    };
 
     let arguments = Parameters {
         input_file,
         output_file,
         dimensions,
         block_dimensions,
-        input_format
+        input_format,
+        archive
     };
     return Ok(arguments);
 }
