@@ -69,8 +69,8 @@ impl Block {
                 for z in 0..microblock_amount_in_range.z {
                     let local_microblock_index = Vector3::from_xyz(x, y, z);
                     let global_microblock_index = local_microblock_index + microblock_start;
-                    let src_microblock_index = Vector3::linear_index(global_microblock_index, microblock_amount_in_block);
-                    let dest_microblock_index = Vector3::linear_index(local_microblock_index, microblock_amount_in_range);
+                    let src_microblock_index = Vector3::linear_index(local_microblock_index, microblock_amount_in_range);
+                    let dest_microblock_index = Vector3::linear_index(global_microblock_index, microblock_amount_in_block);
 
                     for i in 0..microblock_size {
                         let dest_index = i as usize + dest_microblock_index * microblock_size as usize;

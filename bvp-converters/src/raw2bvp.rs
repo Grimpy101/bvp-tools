@@ -51,14 +51,15 @@ fn volume2block(parent_block_i: usize, dimensions: Vector3<u32>, block_dimension
                 // If it does, point to that block through placement,
                 // else schedule block for writing to file and store its index
                 let exists;
+                let mut block_id = 0;
                 match bvp_state.block_map.get(&block_hash) {
-                    Some(block_id) => {
-                        let hashed_block = &bvp_state.blocks[*block_id];
+                    Some(bi) => {
+                        let hashed_block = &bvp_state.blocks[*bi];
                         if hashed_block.is_equal_data(&block_data) {
-                            exists = false;
-                        } else {
-                            bvp_state.blocks[0].placements.push(Placement::new(block_start, block_id.clone()));
                             exists = true;
+                            block_id = *bi;
+                        } else {
+                            exists = false;
                         }
                     },
                     None => {
@@ -66,8 +67,9 @@ fn volume2block(parent_block_i: usize, dimensions: Vector3<u32>, block_dimension
                     }
                 };
 
+                println!("{}", block_data.len());
                 if !exists {
-                    let block_id = bvp_state.blocks.len();
+                    block_id = bvp_state.blocks.len();
                     let block_url = format!("blocks/block_{}.raw", block_id);
                     bvp_state.block_map.insert(block_hash, block_id);
                     let mut new_block = Block::new(block.dimensions, Some(format_i), None);
@@ -76,6 +78,8 @@ fn volume2block(parent_block_i: usize, dimensions: Vector3<u32>, block_dimension
                     bvp_state.blocks.push(new_block);
                     bvp_state.files.push(File::new(block_url, Rc::new(block_data), None));
                 }
+
+                bvp_state.blocks[parent_block_i].placements.push(Placement::new(block_start, block_id.clone()));
             }
         }
     }

@@ -27,6 +27,14 @@ impl PrimitiveType {
             }
         }
     }
+
+    pub fn to_string(&self) -> String {
+        return match self {
+            PrimitiveType::Float => "f".to_string(),
+            PrimitiveType::Int => "i".to_string(),
+            PrimitiveType::Uint => "u".to_string()
+        };
+    }
 }
 
 pub struct MonoFormat {
@@ -51,6 +59,16 @@ impl FormatFamily {
             FormatFamily::Mono(_) => "mono".to_string(),
         };
     }
+
+    pub fn to_json(&self, hm: &mut HashMap<String, JsonValue>) {
+        match self {
+            FormatFamily::Mono(m) => {
+                hm.insert("count".to_string(), (m.count as f64).into());
+                hm.insert("type".to_string(), m.tp.to_string().into());
+                hm.insert("size".to_string(), (m.size as f64).into());
+            }
+        }
+    }
 }
 
 pub struct Format {
@@ -69,6 +87,7 @@ impl Format {
         hm.insert("family".to_string(), self.family.to_string().into());
         hm.insert("microblockSize".to_string(), (self.microblock_size as f64).into());
         hm.insert("microblockDimensions".to_string(), self.microblock_dimensions.to_f64_vec().into());
+        self.family.to_json(&mut hm);
         return hm;
     }
 

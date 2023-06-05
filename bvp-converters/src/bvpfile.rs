@@ -178,15 +178,6 @@ impl BVPFile {
 
         state.asset = Asset::from_json(&json["asset"])?;
 
-        match &json["modalities"] {
-            JsonValue::Array(a) => {
-                for el in a {
-                    let modality = Modality::from_json(&el)?;
-                    state.modalities.push(modality);
-                }
-            },
-            _ => ()
-        };
         match &json["blocks"] {
             JsonValue::Array(a) => {
                 for el in a {

@@ -50,12 +50,10 @@ pub fn to_saf_archive(files: &Vec<File>) -> Result<Vec<u8>, String> {
         saf.push(*i);
     }
     for file in files {
-        println!("Archiving file {}...", file.name);
         for i in file.data.as_ref() {
             saf.push(*i);
         }
     }
-    println!("Man. size: {}, Saf size: {}", manifest_size, saf_size);
 
     return Ok(saf);
 }
@@ -117,7 +115,10 @@ pub fn from_saf_archive(saf: &Vec<u8>) -> Result<Vec<File>, String> {
         match file_entry {
             JsonValue::Object(o) => {
                 let path = json_aux::get_string_from_json(&o["path"])?;
-                let mime = json_aux::get_string_from_json(&o["mime"])?;
+                let mime = match o.get("mime") {
+                    Some(s) => json_aux::get_string_from_json(s)?,
+                    None => String::new()
+                };
                 let size = json_aux::get_u32_from_json(&o["size"])? as usize;
                 let data = saf[offset..offset+size].to_vec();
                 let file = File::new(path, Rc::new(data), Some(mime));

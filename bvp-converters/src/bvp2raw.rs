@@ -1,4 +1,4 @@
-use std::{env, path::Path, fs, io::Read, str, borrow::BorrowMut};
+use std::{env, path::Path, fs, str};
 
 use block::Block;
 use bvpfile::{File, BVPFile};
@@ -73,7 +73,7 @@ fn main() -> Result<(), String> {
     }
     let input_filepath = Path::new(arguments[1].as_str());
 
-    let mut files = Vec::new();
+    let files;
     if input_filepath.is_dir() {
         files = get_files_from_dir(input_filepath)?;
     } else if input_filepath.is_file() {
@@ -118,7 +118,8 @@ fn main() -> Result<(), String> {
             }
         };
         let root_volume_size = format.count_space(root_block.dimensions);
-        let root_data = Vec::with_capacity(root_volume_size as usize);
+        let mut root_data = Vec::with_capacity(root_volume_size as usize);
+        unsafe { root_data.set_len(root_volume_size as usize); }
         let mut new_block = Block::new(root_block.dimensions, root_block.format, None);
         new_block.data = Some(root_data);
 
