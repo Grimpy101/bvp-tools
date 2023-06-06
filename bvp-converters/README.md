@@ -22,8 +22,8 @@ The program accepts one parameter: a path to JSON configuration file. The conten
 | name            | str       | A custom name to be set as BVP `modality` attribute. Defaults to the original file name (without extension)   | no           |
 | description     | str       | A custom description to be set as BVP `modality` attribute. Defaults to None                                  | no           |
 | semanticType    | str       | A custom semantic type to be set as BVP `modality` attribute. Defaults to None                                | no           |
-| volumeSize      | arr[f32]  | Sets volume size in real life (in milimeters). Defaults to [1, 1, 1]                                          | no           |
-| voxelSize       | arr[f32]  | Sets voxel size in real life (in milimeters)                                                                  | no           |
+| volumeSize      | arr[f32]  | Sets volume size in real life (in millimeters). Defaults to [1, 1, 1]                                         | no           |
+| voxelSize       | arr[f32]  | Sets voxel size in real life (in millimeters)                                                                 | no           |
 
 Of the formats, only `mono` is currently supported. The corresponding object might look like this:
 
@@ -45,4 +45,4 @@ It outputs volume in raw data format.
 
 ## Building from source
 
-Moving into the `bvp-converters`, the binaries can be generated with `cargo build --release`, and are consequently present in `/target/release` folder.
+Moving into `bvp-converters` folder, the binaries can be generated with `cargo build --release`, and are afterwards present in `/target/release` folder.
