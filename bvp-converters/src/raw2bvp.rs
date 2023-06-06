@@ -119,10 +119,12 @@ fn main() -> Result<(), String> {
     let input_data = read_input_file(&parameters.input_file)?;
     let mut bvp_file = BVPFile::new();
     bvp_file.formats.push(parameters.input_format);
-    let scale = Vector3 { x: 1.0, y: 1.0, z: 1.0 };
     let root_block_index = 0;
 
-    bvp_file.modalities.push(Modality::new(None, None, None, scale, root_block_index));
+    bvp_file.modalities.push(Modality::new(
+        parameters.name, parameters.description, parameters.semantic_type,
+        parameters.volume_scale, parameters.voxel_scale, root_block_index
+    ));
 
     // Create volume root block to populate with smaller blocks
     let parent_block = Block::new(parameters.dimensions, Some(root_block_index), Some(input_data));

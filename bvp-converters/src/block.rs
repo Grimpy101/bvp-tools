@@ -78,8 +78,6 @@ impl Block {
             None => return Err("Block does not have data".to_string()),
         };
         let dest_bytes = self.data.as_mut().unwrap();
-        println!("{}, {}",dest_bytes.len(), src_bytes.len());
-        println!("{} * {}", microblock_size, microblock_amount_in_range);
 
         for x in 0..microblock_amount_in_range.x {
             for y in 0..microblock_amount_in_range.y {

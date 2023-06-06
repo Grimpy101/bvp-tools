@@ -19,6 +19,11 @@ The program accepts one parameter: a path to JSON configuration file. The conten
 | format          | object    | Represents the interpretation of data for conversion to BVP                                                   | yes          |
 | archive         | str       | If provided, combines all output files into archive of the provided type. So far, SAF and None are supported  | no           |
 | compression     | str       | If provided, compresses output data with provided compression algorithm. So far, LZ4S and None are supported. | no           |
+| name            | str       | A custom name to be set as BVP `modality` attribute. Defaults to the original file name (without extension)   | no           |
+| description     | str       | A custom description to be set as BVP `modality` attribute. Defaults to None                                  | no           |
+| semanticType    | str       | A custom semantic type to be set as BVP `modality` attribute. Defaults to None                                | no           |
+| volumeSize      | arr[f32]  | Sets volume size in real life (in milimeters). Defaults to [1, 1, 1]                                          | no           |
+| voxelSize       | arr[f32]  | Sets voxel size in real life (in milimeters)                                                                  | no           |
 
 Of the formats, only `mono` is currently supported. The corresponding object might look like this:
 

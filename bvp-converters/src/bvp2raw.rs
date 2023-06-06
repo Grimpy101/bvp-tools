@@ -137,9 +137,20 @@ fn main() -> Result<(), String> {
         }
         
         let volume_name = match modality.name {
-            Some(n) => format!("{}.raw", n),
+            Some(n) => {
+                println!("aha");
+                format!("{}.raw", n)
+            },
             None => {
-                format!("{}_volume_{}.raw", input_filepath.file_name().unwrap().to_string_lossy(), name_index)
+                let filename = input_filepath.file_stem();
+                match filename {
+                    Some(f) => {
+                        format!("{}_volume_{}.raw", f.to_string_lossy(), name_index)
+                    },
+                    None => {
+                        format!("default_volume_{}.raw", name_index)
+                    }
+                }
             }
         };
 

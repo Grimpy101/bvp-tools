@@ -13,6 +13,17 @@ pub fn get_u32_from_json(j: &JsonValue) -> Result<u32, String> {
     };
 }
 
+pub fn get_f32_from_json(j: &JsonValue) -> Result<f32, String> {
+    match j {
+        JsonValue::Number(n) => {
+            return Ok(*n as f32);
+        },
+        _ => {
+            return Err("JSON parsing error: Not a number".to_string());
+        }
+    };
+}
+
 pub fn get_u32_dimensions_from_json(j: &JsonValue) -> Result<Vector3<u32>, String> {
     match j {
         JsonValue::Array(a) => {

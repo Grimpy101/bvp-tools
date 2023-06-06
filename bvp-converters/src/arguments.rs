@@ -1,4 +1,4 @@
-use std::{fs, collections::HashMap};
+use std::{fs, collections::HashMap, path::Path};
 
 use tinyjson::JsonValue;
 
@@ -234,6 +234,11 @@ pub fn parse_args(labels: Vec<ArgLabel>, program_name: &str, program_description
 */
 pub struct Parameters {
     pub input_file: String,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub semantic_type: Option<String>,
+    pub volume_scale: Vector3<f32>,
+    pub voxel_scale: Option<Vector3<f32>>,
     pub output_file: String,
     pub dimensions: Vector3<u32>,
     pub block_dimensions: Vector3<u32>,
@@ -294,6 +299,46 @@ pub fn parse_config(filepath: &str) -> Result<Parameters, String> {
         },
         None => CompressionType::None
     };
+    let name = match hashmap.get("name") {
+        Some(s) => {
+            let s = json_aux::get_string_from_json(s)?;
+            Some(s)
+        },
+        None => {
+            let file2path = Path::new(&input_file);
+            if file2path.file_stem().is_some() {
+                Some(file2path.file_stem().unwrap().to_string_lossy().to_string())
+            } else {
+                None
+            }
+        }
+    };
+    let description = match hashmap.get("description") {
+        Some(s) => {
+            let s = json_aux::get_string_from_json(s)?;
+            Some(s)
+        },
+        None => None
+    };
+    let semantic_type = match hashmap.get("semanticType") {
+        Some(s) => {
+            let s = json_aux::get_string_from_json(s)?;
+            Some(s)
+        },
+        None => None
+    };
+    let volume_scale = match hashmap.get("volumeScale") {
+        Some(s) => {
+            Vector3::<f32>::from_json(s)?
+        },
+        None => Vector3::<f32>{ x: 1.0f32, y: 1.0f32, z: 1.0f32 }
+    };
+    let voxel_scale = match hashmap.get("voxelScale") {
+        Some(s) => {
+            Some(Vector3::<f32>::from_json(s)?)
+        },
+        None => None
+    };
 
     let arguments = Parameters {
         input_file,
@@ -302,7 +347,12 @@ pub fn parse_config(filepath: &str) -> Result<Parameters, String> {
         block_dimensions,
         input_format,
         archive,
-        compression
+        compression,
+        name,
+        description,
+        semantic_type,
+        volume_scale,
+        voxel_scale
     };
     return Ok(arguments);
 }
