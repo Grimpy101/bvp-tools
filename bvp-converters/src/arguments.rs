@@ -2,7 +2,7 @@ use std::{fs, collections::HashMap};
 
 use tinyjson::JsonValue;
 
-use crate::{vector3::Vector3, formats::{Format}, json_aux, archives::ArchiveEnum};
+use crate::{vector3::Vector3, formats::{Format}, json_aux, archives::ArchiveEnum, compression::CompressionType};
 /*
 pub enum ArgType {
     String(String),
@@ -238,7 +238,8 @@ pub struct Parameters {
     pub dimensions: Vector3<u32>,
     pub block_dimensions: Vector3<u32>,
     pub input_format: Format,
-    pub archive: ArchiveEnum
+    pub archive: ArchiveEnum,
+    pub compression: CompressionType
 }
 
 pub fn parse_config(filepath: &str) -> Result<Parameters, String> {
@@ -280,6 +281,19 @@ pub fn parse_config(filepath: &str) -> Result<Parameters, String> {
         },
         None => ArchiveEnum::None
     };
+    let compression = match hashmap.get("compression") {
+        Some(s) => {
+            let s = json_aux::get_string_from_json(s)?;
+            match s.as_str() {
+                "LZ4S" => CompressionType::LZ4S,
+                "None" => CompressionType::None,
+                _ => {
+                    return Err("Compression type not supported".to_string());
+                }
+            }
+        },
+        None => CompressionType::None
+    };
 
     let arguments = Parameters {
         input_file,
@@ -287,7 +301,8 @@ pub fn parse_config(filepath: &str) -> Result<Parameters, String> {
         dimensions,
         block_dimensions,
         input_format,
-        archive
+        archive,
+        compression
     };
     return Ok(arguments);
 }

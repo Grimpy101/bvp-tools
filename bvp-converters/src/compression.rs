@@ -1,3 +1,17 @@
+pub enum CompressionType {
+    None,
+    LZ4S
+}
+
+impl CompressionType {
+    pub fn to_string(&self) -> String {
+        match self {
+            CompressionType::LZ4S => return "lz4s".to_string(),
+            CompressionType::None => return "raw".to_string()
+        }
+    }
+}
+
 pub fn read_u32(src: &Vec<u8>, i: usize) -> u32 {
     let b1 = src[i] as u32;
     let b2 = src[i+1] as u32;
@@ -27,7 +41,7 @@ pub fn create_hash_table() -> Vec<u32> {
     return hash_table;
 }
 
-pub fn compress_lz4(src: &Vec<u8>) -> Result<Vec<u8>, String> {
+pub fn compress_lz4s(src: &Vec<u8>) -> Result<Vec<u8>, String> {
     let mut hash_table = create_hash_table(); // Table for looking up already written data
     let src_len_f64 = src.len() as f64;
     let dest_len = (src_len_f64 + (src_len_f64 / 255.0) + 16.0).floor() as usize;
@@ -38,7 +52,7 @@ pub fn compress_lz4(src: &Vec<u8>) -> Result<Vec<u8>, String> {
     let mut literal_start = src_index;
 
     while src_index + 4 < src.len() {
-        // Find a match for read source data
+        // Find a match for read uncompressed data
         let data = read_u32(src, src_index);
         let hash32 = hash_u32(data);
         let hash16 = (((hash32 >> 16) ^ hash32) & 0xffff) as usize;
@@ -75,7 +89,7 @@ pub fn compress_lz4(src: &Vec<u8>) -> Result<Vec<u8>, String> {
         let token = (token_literal_count << 4) | token_match_length;
         dest.push(token as u8);
 
-        // Write possible additional data length bytes
+        // Write additional uncompressed data length bytes
         if literal_count >= 0xf {
             let mut remaining = literal_count - 0xf;
             while remaining >= 0xff {
@@ -85,15 +99,15 @@ pub fn compress_lz4(src: &Vec<u8>) -> Result<Vec<u8>, String> {
             dest.push(remaining as u8);
         }
 
-        // Write source data
+        // Write uncopressed data
         for _ in 0..literal_count {
             dest.push(src[literal_start]);
             literal_start += 1;
         }
 
         // Write match offset
-        dest.push((match_offset as u8 >> 0) & 0xff);
-        dest.push((match_offset as u8 >> 8) & 0xff);
+        dest.push(((match_offset >> 0) & 0xff) as u8);
+        dest.push(((match_offset >> 8) & 0xff) as u8);
 
         // Write possible additional match length bytes
         if match_length >= 0xf {
@@ -108,7 +122,7 @@ pub fn compress_lz4(src: &Vec<u8>) -> Result<Vec<u8>, String> {
         literal_start = src_index;
     }
 
-    // Write remaining data as before
+    // Write remaining uncompressed data as before
 
     let literal_count = src.len() - literal_start;
     let match_length = 0;
@@ -137,4 +151,53 @@ pub fn compress_lz4(src: &Vec<u8>) -> Result<Vec<u8>, String> {
     }
 
     return Ok(dest);
+}
+
+pub fn decompress_lz4s(src: &Vec<u8>, size: usize) -> Vec<u8> {
+    let mut dest = Vec::with_capacity(size);
+    let mut src_index = 0;
+
+    while src_index < src.len() {
+        let token = src[src_index];
+        src_index += 1;
+        if token == 0 {
+            break;
+        }
+
+        // Copy uncompressed data
+        let mut literal_count = token as u32 >> 4;
+        if literal_count == 0x0f {
+            literal_count += src[src_index] as u32;
+            while src[src_index] == 0xff {
+                src_index += 1;
+                literal_count += src[src_index] as u32;
+            }
+        }
+
+        for _ in 0..literal_count {
+            dest.push(src[src_index]);
+            src_index += 1;
+        }
+
+        // Copy mach data
+
+        let offset = ((src[src_index + 0] as u32) << 0) | ((src[src_index + 1] as u32) << 8);
+        src_index += 2;
+        let mut match_index = dest.len() - offset as usize;
+        let mut match_length = (token & 0x0f) as u32;
+        if match_length == 0x0f {
+            match_length += src[src_index] as u32;
+            while src[src_index] == 0xff {
+                src_index += 1;
+                match_length += src[src_index] as u32;
+            }
+        }
+
+        for _ in 0..match_length {
+            dest.push(dest[match_index]);
+            match_index += 1;
+        }
+    }
+
+    return dest;
 }

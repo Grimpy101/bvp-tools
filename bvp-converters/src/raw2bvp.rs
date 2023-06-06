@@ -3,6 +3,7 @@ use std::{rc::Rc, env, fs};
 use archives::to_saf_archive;
 use block::Block;
 use bvpfile::{BVPFile, File, Modality};
+use compression::CompressionType;
 use placement::Placement;
 use vector3::Vector3;
 use xxhash_rust::xxh3::xxh3_64;
@@ -28,7 +29,9 @@ mod json_aux;
 /// * `block_dimensions` are dimensions of blocks inside the parent block
 /// * `format_i` is an index to a format in vector *bvp_state.formats*
 /// * `bvp_state` is a state tracking object for single BVP file
-fn volume2block(parent_block_i: usize, dimensions: Vector3<u32>, block_dimensions: Vector3<u32>, format_i: usize, bvp_state: &mut BVPFile) -> Result<(), String> {
+fn volume2block(parent_block_i: usize, dimensions: Vector3<u32>,
+    block_dimensions: Vector3<u32>, format_i: usize, encoding: CompressionType, bvp_state: &mut BVPFile) -> Result<(), String> {
+    
     let block_count = (dimensions / block_dimensions).ceil();
     let format = &bvp_state.formats[format_i];
 
@@ -67,11 +70,19 @@ fn volume2block(parent_block_i: usize, dimensions: Vector3<u32>, block_dimension
                     }
                 };
 
+                let block_data = match encoding {
+                    CompressionType::None => block_data,
+                    CompressionType::LZ4S => {
+                        compression::compress_lz4s(&block_data)?
+                    },
+                };
+
                 if !exists {
                     block_id = bvp_state.blocks.len();
                     let block_url = format!("blocks/block_{}.raw", block_id);
                     bvp_state.block_map.insert(block_hash, block_id);
                     let mut new_block = Block::new(block.dimensions, Some(format_i), None);
+                    new_block.encoding = Some(encoding.to_string());
                     new_block.format = bvp_state.blocks[parent_block_i].format;
                     new_block.data_url = Some(block_url.clone());
                     bvp_state.blocks.push(new_block);
@@ -109,13 +120,15 @@ fn main() -> Result<(), String> {
     let mut bvp_file = BVPFile::new();
     bvp_file.formats.push(parameters.input_format);
     let scale = Vector3 { x: 1.0, y: 1.0, z: 1.0 };
-    bvp_file.modalities.push(Modality::new(None, None, None, scale, 0));
+    let root_block_index = 0;
+
+    bvp_file.modalities.push(Modality::new(None, None, None, scale, root_block_index));
 
     // Create volume root block to populate with smaller blocks
-    let parent_block = Block::new(parameters.dimensions, Some(0), Some(input_data));
+    let parent_block = Block::new(parameters.dimensions, Some(root_block_index), Some(input_data));
     bvp_file.blocks.push(parent_block);
     
-    volume2block(0, parameters.dimensions, parameters.block_dimensions, 0, &mut bvp_file)?;
+    volume2block(0, parameters.dimensions, parameters.block_dimensions, root_block_index, parameters.compression, &mut bvp_file)?;
     
     bvp_file.files.push(File::new("manifest.json".to_string(), Rc::new(bvp_file.to_manifest()?), Some("application/json".to_string())));
     

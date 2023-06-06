@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use tinyjson::JsonValue;
 
-use crate::{placement::Placement, formats::Format, vector3::Vector3, json_aux::{get_u32_from_json, get_string_from_json}, bvpfile::File};
+use crate::{placement::Placement, formats::Format, vector3::Vector3, json_aux::{get_u32_from_json, get_string_from_json}, bvpfile::File, compression};
 
 pub struct Block {
     pub dimensions: Vector3<u32>,
@@ -10,7 +10,7 @@ pub struct Block {
     pub format: Option<usize>,
     pub data: Option<Vec<u8>>,
     pub data_url: Option<String>,
-    encoding: Option<String>
+    pub encoding: Option<String>
 }
 
 impl Block {
@@ -58,8 +58,23 @@ impl Block {
         let microblock_amount_in_range = (extent / microblock_dimensions).to_u32();
         let microblock_amount_in_block = (self.dimensions / microblock_dimensions).to_u32();
 
+        let src_original_len = format.count_space(block.dimensions) as usize;
+        let mut decompressed_src = Vec::new();
         let src_bytes = match &block.data {
-            Some(v) => v,
+            Some(v) => {
+                if block.encoding.is_none() {
+                    v
+                } else {
+                    match block.encoding.as_ref().unwrap().as_str() {
+                        "raw" => v,
+                        "lz4s" => {
+                            decompressed_src = compression::decompress_lz4s(&v, src_original_len);
+                            &decompressed_src
+                        },
+                        _ => return Err("Unknown compression scheme".to_string())
+                    }
+                }
+            },
             None => return Err("Block does not have data".to_string()),
         };
         let dest_bytes = self.data.as_mut().unwrap();
