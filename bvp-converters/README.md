@@ -2,7 +2,7 @@
 Here are located various tools for conversion between volumes in BVP format and other formats.
 
 ## Tools
-Currently, there are the following programs:
+Currently, the following programs are included:
 
 * `raw2bvp` - Converts volume in raw data file to BVP
 * `bvp2raw` - Converts volume in BVP format to raw data file
