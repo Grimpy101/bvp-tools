@@ -1,3 +1,5 @@
+use std::num::Wrapping;
+
 pub enum CompressionType {
     None,
     LZ4S
@@ -23,13 +25,14 @@ pub fn read_u32(src: &Vec<u8>, i: usize) -> u32 {
 
 // Bob Jenkins 4-byte integer hashing
 pub fn hash_u32(x: u32) -> u32 {
-    let mut x = (x + 0x7ed55d16) + (x <<  12);
-    x = (x ^ 0xc761c23c) ^ (x >> 19);
-    x = (x + 0x165667b1) + (x << 5);
-    x = (x + 0xd3a2646c) ^ (x << 9);
-    x = (x + 0xfd7046c5) + (x << 3);
-    x = (x ^ 0xb55a4f09) ^ (x >> 16);
-    return x;
+    let mut x = Wrapping(x);
+    x = (x + Wrapping(0x7ed55d16)) + (x <<  12);
+    x = (x ^ Wrapping(0xc761c23c)) ^ (x >> 19);
+    x = (x + Wrapping(0x165667b1)) + (x << 5);
+    x = (x + Wrapping(0xd3a2646c)) ^ (x << 9);
+    x = (x + Wrapping(0xfd7046c5)) + (x << 3);
+    x = (x ^ Wrapping(0xb55a4f09)) ^ (x >> 16);
+    return x.0;
 }
 
 pub fn create_hash_table() -> Vec<u32> {
@@ -62,7 +65,7 @@ pub fn compress_lz4s(src: &Vec<u8>) -> Result<Vec<u8>, String> {
 
         let match_found = match_index >= 0; // The valid index check
         let mut match_correct = false;
-        let match_offset = src_index - match_index as usize;
+        let match_offset = src_index as i32 - match_index;
         let match_near_enough = match_offset < (1 << 16);
         if match_found {
             match_correct = read_u32(src, match_index as usize) == data;
@@ -99,7 +102,7 @@ pub fn compress_lz4s(src: &Vec<u8>) -> Result<Vec<u8>, String> {
             dest.push(remaining as u8);
         }
 
-        // Write uncopressed data
+        // Write uncompressed data
         for _ in 0..literal_count {
             dest.push(src[literal_start]);
             literal_start += 1;
@@ -145,6 +148,10 @@ pub fn compress_lz4s(src: &Vec<u8>) -> Result<Vec<u8>, String> {
         literal_start += 1;
     }
 
+    // Write match offset
+    dest.push(((1u32 >> 0) & 0xff) as u8);
+    dest.push(((1u32 >> 8) & 0xff) as u8);
+
     // Write end token
     if literal_count > 0 {
         dest.push(0);
@@ -172,6 +179,7 @@ pub fn decompress_lz4s(src: &Vec<u8>, size: usize) -> Vec<u8> {
                 src_index += 1;
                 literal_count += src[src_index] as u32;
             }
+            src_index += 1;
         }
 
         for _ in 0..literal_count {
@@ -181,18 +189,19 @@ pub fn decompress_lz4s(src: &Vec<u8>, size: usize) -> Vec<u8> {
 
         // Copy mach data
 
+        let mut match_length = (token & 0x0f) as u32;
         let offset = ((src[src_index + 0] as u32) << 0) | ((src[src_index + 1] as u32) << 8);
         src_index += 2;
         let mut match_index = dest.len() - offset as usize;
-        let mut match_length = (token & 0x0f) as u32;
         if match_length == 0x0f {
             match_length += src[src_index] as u32;
             while src[src_index] == 0xff {
                 src_index += 1;
                 match_length += src[src_index] as u32;
             }
+            src_index += 1;
         }
-
+        
         for _ in 0..match_length {
             dest.push(dest[match_index]);
             match_index += 1;

@@ -78,6 +78,8 @@ impl Block {
             None => return Err("Block does not have data".to_string()),
         };
         let dest_bytes = self.data.as_mut().unwrap();
+        println!("{}, {}",dest_bytes.len(), src_bytes.len());
+        println!("{} * {}", microblock_size, microblock_amount_in_range);
 
         for x in 0..microblock_amount_in_range.x {
             for y in 0..microblock_amount_in_range.y {
@@ -239,14 +241,13 @@ impl Block {
                 match o.get("data") {
                     Some(d) => {
                         let data_url = get_string_from_json(d)?;
-                        // This is technically required by specification... TODO: Implement!
-                        //let encoding = get_string_from_json(&o["encoding"])?;
+                        let encoding = get_string_from_json(&o["encoding"])?;
                         
                         for file in files {
                             if file.name == data_url {
                                 let data = file.data.to_vec();
                                 block.data_url = Some(data_url);
-                                //block.encoding = Some(encoding);
+                                block.encoding = Some(encoding);
                                 block.data = Some(data);
                                 break;
                             }

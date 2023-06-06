@@ -16,7 +16,7 @@ The program accepts one parameter: a path to JSON configuration file. The conten
 | outputFile      | str       | A path to final result file.                                                                                  | yes          |
 | dimensions      | arr[uint] | An array of 3 positive integers, representing dimensions of the input volume                                  | yes          |
 | blockDimensions | arr[uint] | An array of 3 positive integers, representing dimensions of blocks to chop the input volume into              | yes          |
-| format          | Object    | Represents the interpretation of data for conversion to BVP                                                   | yes          |
+| format          | object    | Represents the interpretation of data for conversion to BVP                                                   | yes          |
 | archive         | str       | If provided, combines all output files into archive of the provided type. So far, SAF and None are supported  | no           |
 | compression     | str       | If provided, compresses output data with provided compression algorithm. So far, LZ4S and None are supported. | no           |
 
