@@ -20,10 +20,13 @@ The program accepts one parameter: a path to JSON configuration file. The conten
 | archive         | str       | If provided, combines all output files into archive of the provided type. So far, SAF and None are supported  | no           |
 | compression     | str       | If provided, compresses output data with provided compression algorithm. So far, LZ4S and None are supported. | no           |
 | name            | str       | A custom name to be set as BVP `modality` attribute. Defaults to the original file name (without extension)   | no           |
-| description     | str       | A custom description to be set as BVP `modality` attribute. Defaults to None                                  | no           |
-| semanticType    | str       | A custom semantic type to be set as BVP `modality` attribute. Defaults to None                                | no           |
-| volumeSize      | arr[f32]  | Sets volume size in real life (in millimeters). Defaults to [1, 1, 1]                                         | no           |
-| voxelSize       | arr[f32]  | Sets voxel size in real life (in millimeters)                                                                 | no           |
+| description     | str       | A custom description to be set as BVP `modality` attribute. Defaults to none                                  | no           |
+| semanticType    | str       | A custom semantic type to be set as BVP `modality` attribute. Defaults to none                                | no           |
+| volumeScale     | arr[f32]  | Sets volume size in real life (in millimeters). Defaults to [1, 1, 1]                                         | no           |
+| voxelScale      | arr[f32]  | Sets voxel size in real life (in millimeters). Defaults to none                                               | no           |
+| author          | str       | Sets the author of the volume(s) in BVP asset. Defaults to none                                               | no           |
+| copyright       | str       | Sets the copyright of the volume(s) in BVP asset. Defaults to none                                            | no           |
+| acquisitionTime | str       | Sets the acquisition time of the BVP asset. Should be in timestamp format. Defaults to none                   | no           |
 
 Of the formats, only `mono` is currently supported. The corresponding object might look like this:
 

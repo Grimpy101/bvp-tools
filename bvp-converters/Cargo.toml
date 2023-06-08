@@ -16,3 +16,4 @@ path = "src/bvp2raw.rs"
 [dependencies]
 tinyjson = "2.5.1"
 xxhash-rust = { version = "0.8.6", features = ["xxh3"] }
+chrono = { version = "0.4.26", features = ["clock"] }

@@ -17,13 +17,13 @@ mod json_aux;
 
 fn get_files_from_dir(filepath: &Path) -> Result<Vec<File>, String> {
     let vec = Vec::new();
-
+    // TODO: Implement!
     return Ok(vec);
 }
 
 fn get_files_from_json(filepath: &Path) -> Result<Vec<File>, String> {
     let vec = Vec::new();
-
+    // TODO: Implement!
     return Ok(vec);
 }
 
@@ -72,7 +72,6 @@ fn main() -> Result<(), String> {
         return Err("Missing input file".to_string());
     }
     let input_filepath = Path::new(arguments[1].as_str());
-
     let files;
     if input_filepath.is_dir() {
         files = get_files_from_dir(input_filepath)?;
@@ -119,6 +118,9 @@ fn main() -> Result<(), String> {
         };
         let root_volume_size = format.count_space(root_block.dimensions);
         let mut root_data = Vec::with_capacity(root_volume_size as usize);
+        // This expects that the BVP asset is formed correctly
+        // and that all blocks in the volume are provided. If a block
+        // is somehow left out, the random data will not be overwritten - this is bad!
         unsafe { root_data.set_len(root_volume_size as usize); }
         let mut new_block = Block::new(root_block.dimensions, root_block.format, None);
         new_block.data = Some(root_data);
@@ -127,18 +129,14 @@ fn main() -> Result<(), String> {
         for placement in &bvp_state.blocks[root_block_index].placements {
             let block_index = placement.block;
             let block = &bvp_state.blocks[block_index];
-            match new_block.set_data_in_range(placement.position, block, &format) {
-                Ok(()) => (),
-                Err(_) => {
-                    error = true;
-                    break;
-                }
+            if new_block.set_data_in_range(placement.position, block, &format).is_err() {
+                error = true;
+                break;
             };
         }
         
         let volume_name = match modality.name {
             Some(n) => {
-                println!("aha");
                 format!("{}.raw", n)
             },
             None => {

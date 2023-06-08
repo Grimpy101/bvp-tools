@@ -244,7 +244,10 @@ pub struct Parameters {
     pub block_dimensions: Vector3<u32>,
     pub input_format: Format,
     pub archive: ArchiveEnum,
-    pub compression: CompressionType
+    pub compression: CompressionType,
+    pub author: Option<String>,
+    pub copyright: Option<String>,
+    pub acquisition_time: Option<String>
 }
 
 pub fn parse_config(filepath: &str) -> Result<Parameters, String> {
@@ -339,6 +342,24 @@ pub fn parse_config(filepath: &str) -> Result<Parameters, String> {
         },
         None => None
     };
+    let author = match hashmap.get("author") {
+        Some(s) => {
+            Some(json_aux::get_string_from_json(s)?)
+        },
+        None => None
+    };
+    let copyright = match hashmap.get("copyright") {
+        Some(s) => {
+            Some(json_aux::get_string_from_json(s)?)
+        },
+        None => None
+    };
+    let acquisition_time = match hashmap.get("acquisitionTime") {
+        Some(s) => {
+            Some(json_aux::get_string_from_json(s)?)
+        },
+        None => None
+    };
 
     let arguments = Parameters {
         input_file,
@@ -352,7 +373,10 @@ pub fn parse_config(filepath: &str) -> Result<Parameters, String> {
         description,
         semantic_type,
         volume_scale,
-        voxel_scale
+        voxel_scale,
+        author,
+        copyright,
+        acquisition_time
     };
     return Ok(arguments);
 }

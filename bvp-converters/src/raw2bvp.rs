@@ -51,14 +51,13 @@ fn volume2block(parent_block_i: usize, dimensions: Vector3<u32>,
                 let block_hash = xxh3_64(&block_data[..]);
 
                 // Check if block with the same data exists.
-                // If it does, point to that block through placement,
-                // else schedule block for writing to file and store its index
                 let exists;
                 let mut block_id = 0;
                 match bvp_state.block_map.get(&block_hash) {
                     Some(bi) => {
                         let hashed_block = &bvp_state.blocks[*bi];
                         if hashed_block.is_equal_data(&block_data) {
+                            // Blocks are equal - use the one already stored
                             exists = true;
                             block_id = *bi;
                         } else {
@@ -70,14 +69,8 @@ fn volume2block(parent_block_i: usize, dimensions: Vector3<u32>,
                     }
                 };
 
-                let block_data = match encoding {
-                    CompressionType::None => block_data,
-                    CompressionType::LZ4S => {
-                        compression::compress_lz4s(&block_data)?
-                    },
-                };
-
                 if !exists {
+                    // Schedule block for writing to file and store its index
                     block_id = bvp_state.blocks.len();
                     let block_url = format!("blocks/block_{}.raw", block_id);
                     bvp_state.block_map.insert(block_hash, block_id);
@@ -86,6 +79,14 @@ fn volume2block(parent_block_i: usize, dimensions: Vector3<u32>,
                     new_block.format = bvp_state.blocks[parent_block_i].format;
                     new_block.data_url = Some(block_url.clone());
                     bvp_state.blocks.push(new_block);
+
+                    let block_data = match encoding {
+                        CompressionType::None => block_data,
+                        CompressionType::LZ4S => {
+                            compression::compress_lz4s(&block_data)?
+                        },
+                    };
+
                     bvp_state.files.push(File::new(block_url, Rc::new(block_data), None));
                 }
 
@@ -122,9 +123,15 @@ fn main() -> Result<(), String> {
     let root_block_index = 0;
 
     bvp_file.modalities.push(Modality::new(
-        parameters.name, parameters.description, parameters.semantic_type,
+        parameters.name.clone(), parameters.description.clone(), parameters.semantic_type,
         parameters.volume_scale, parameters.voxel_scale, root_block_index
     ));
+    bvp_file.asset.author = parameters.author;
+    bvp_file.asset.copyright = parameters.copyright;
+    bvp_file.asset.acquisition_time = parameters.acquisition_time;
+    bvp_file.asset.generator = Some("raw2bvp script".to_string());  // TODO: Change to more interesting name
+    bvp_file.asset.name = parameters.name;
+    bvp_file.asset.description = parameters.description;
 
     // Create volume root block to populate with smaller blocks
     let parent_block = Block::new(parameters.dimensions, Some(root_block_index), Some(input_data));
@@ -133,6 +140,9 @@ fn main() -> Result<(), String> {
     volume2block(0, parameters.dimensions, parameters.block_dimensions, root_block_index, parameters.compression, &mut bvp_file)?;
     
     bvp_file.files.push(File::new("manifest.json".to_string(), Rc::new(bvp_file.to_manifest()?), Some("application/json".to_string())));
+    
+    let time = chrono::offset::Utc::now();
+    bvp_file.asset.creation_time = Some(time.timestamp().to_string());
     
     match &parameters.archive {
         archives::ArchiveEnum::SAF => {

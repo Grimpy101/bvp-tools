@@ -5,13 +5,43 @@ use tinyjson::{JsonValue};
 use crate::{block::Block, formats::Format, vector3::Vector3, json_aux::{get_string_from_json, get_u32_from_json}};
 
 pub struct Asset {
-    version: String
+    version: String,
+    pub name: Option<String>,
+    pub generator: Option<String>,
+    pub author: Option<String>,
+    pub description: Option<String>,
+    pub copyright: Option<String>,
+    pub acquisition_time: Option<String>,
+    pub creation_time: Option<String>,
+    pub extensions_used: Option<Vec<String>>,
+    pub extensions_required: Option<Vec<String>>
 }
 
 impl Asset {
     pub fn to_hashmap(&self) -> HashMap<String, JsonValue> {
         let mut hm = HashMap::new();
         hm.insert("version".to_string(), self.version.clone().into());
+        if self.name.is_some() {
+            hm.insert("name".to_string(), self.name.as_ref().unwrap().clone().into());
+        }
+        if self.generator.is_some() {
+            hm.insert("generator".to_string(), self.generator.as_ref().unwrap().clone().into());
+        }
+        if self.author.is_some() {
+            hm.insert("author".to_string(), self.author.as_ref().unwrap().clone().into());
+        }
+        if self.description.is_some() {
+            hm.insert("description".to_string(), self.description.as_ref().unwrap().clone().into());
+        }
+        if self.copyright.is_some() {
+            hm.insert("copyright".to_string(), self.copyright.as_ref().unwrap().clone().into());
+        }
+        if self.acquisition_time.is_some() {
+            hm.insert("acquisitionTime".to_string(), self.acquisition_time.as_ref().unwrap().clone().into());
+        }
+        if self.creation_time.is_some() {
+            hm.insert("creationTime".to_string(), self.creation_time.as_ref().unwrap().clone().into());
+        }
         return hm;
     }
 
@@ -23,7 +53,38 @@ impl Asset {
             }
         };
         let version = get_string_from_json(&hashmap["version"])?;
-        let asset = Asset { version };
+        let name = match hashmap.get("name") {
+            Some(s) => Some(get_string_from_json(s)?),
+            None => None
+        };
+        let generator = match hashmap.get("generator") {
+            Some(s) => Some(get_string_from_json(s)?),
+            None => None
+        };
+        let author = match hashmap.get("author") {
+            Some(s) => Some(get_string_from_json(s)?),
+            None => None
+        };
+        let description = match hashmap.get("description") {
+            Some(s) => Some(get_string_from_json(s)?),
+            None => None
+        };
+        let copyright = match hashmap.get("copyright") {
+            Some(s) => Some(get_string_from_json(s)?),
+            None => None
+        };
+        let acquisition_time = match hashmap.get("acquisitionTime") {
+            Some(s) => Some(get_string_from_json(s)?),
+            None => None
+        };
+        let creation_time = match hashmap.get("creationTime") {
+            Some(s) => Some(get_string_from_json(s)?),
+            None => None
+        };
+        let asset = Asset {
+            version, name, generator, author, description, copyright, acquisition_time,
+            creation_time, extensions_required: None, extensions_used: None
+        };
         return Ok(asset);
     }
 }
@@ -138,7 +199,18 @@ pub struct BVPFile {
 
 impl BVPFile {
     pub fn new() -> Self {
-        let asset = Asset { version: "1.0".to_string() };
+        let asset = Asset {
+            version: "1.0".to_string(),
+            name: None,
+            generator: None,
+            author: None,
+            description: None,
+            copyright: None,
+            acquisition_time: None,
+            creation_time: None,
+            extensions_required: None,
+            extensions_used: None
+        };
         let modalities = Vec::new();
         let blocks = Vec::new();
         let formats = Vec::new();
