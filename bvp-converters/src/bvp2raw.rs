@@ -8,7 +8,6 @@ mod block;
 mod placement;
 mod formats;
 mod bvpfile;
-mod aux;
 mod vector3;
 mod archives;
 mod compression;

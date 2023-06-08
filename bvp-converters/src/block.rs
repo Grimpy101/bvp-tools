@@ -59,6 +59,8 @@ impl Block {
         let microblock_amount_in_block = (self.dimensions / microblock_dimensions).to_u32();
 
         let src_original_len = format.count_space(block.dimensions) as usize;
+        // This is stupid, but we need it later
+        // so it can live long enough to be referenced by src_bytes
         let mut decompressed_src = Vec::new();
         let src_bytes = match &block.data {
             Some(v) => {
@@ -69,7 +71,7 @@ impl Block {
                         "raw" => v,
                         "lz4s" => {
                             decompressed_src = compression::decompress_lz4s(&v, src_original_len);
-                            &decompressed_src
+                            &decompressed_src // <--- The culprit
                         },
                         _ => return Err("Unknown compression scheme".to_string())
                     }
@@ -132,6 +134,7 @@ impl Block {
         };
         let dest_vec_size = format.count_space(extent) as usize;
         let mut dest_bytes = Vec::with_capacity(dest_vec_size);
+        // God, I sure hope dest_bytes and src_bytes are of the same size...
         unsafe { dest_bytes.set_len(dest_vec_size); }
         
         for x in 0..microblock_amount_in_range.x {

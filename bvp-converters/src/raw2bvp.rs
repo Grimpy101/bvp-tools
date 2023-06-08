@@ -13,7 +13,6 @@ mod block;
 mod placement;
 mod formats;
 mod bvpfile;
-mod aux;
 mod vector3;
 mod archives;
 mod compression;
@@ -139,10 +138,9 @@ fn main() -> Result<(), String> {
     
     volume2block(0, parameters.dimensions, parameters.block_dimensions, root_block_index, parameters.compression, &mut bvp_file)?;
     
-    bvp_file.files.push(File::new("manifest.json".to_string(), Rc::new(bvp_file.to_manifest()?), Some("application/json".to_string())));
-    
     let time = chrono::offset::Utc::now();
     bvp_file.asset.creation_time = Some(time.timestamp().to_string());
+    bvp_file.files.push(File::new("manifest.json".to_string(), Rc::new(bvp_file.to_manifest()?), Some("application/json".to_string())));
     
     match &parameters.archive {
         archives::ArchiveEnum::SAF => {

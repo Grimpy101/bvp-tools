@@ -23,7 +23,7 @@ pub fn read_u32(src: &Vec<u8>, i: usize) -> u32 {
     return b1 << 0 | b2 << 8 | b3 << 16 | b4 << 24;
 }
 
-// Bob Jenkins 4-byte integer hashing
+// Bob Jenkins 4-byte integer hashing (me thinks)
 pub fn hash_u32(x: u32) -> u32 {
     let mut x = Wrapping(x);
     x = (x + Wrapping(0x7ed55d16)) + (x <<  12);
@@ -148,7 +148,7 @@ pub fn compress_lz4s(src: &Vec<u8>) -> Result<Vec<u8>, String> {
         literal_start += 1;
     }
 
-    // Write match offset
+    // Write match offset... This should be mendatory, right?
     dest.push(((1u32 >> 0) & 0xff) as u8);
     dest.push(((1u32 >> 8) & 0xff) as u8);
 
@@ -190,6 +190,8 @@ pub fn decompress_lz4s(src: &Vec<u8>, size: usize) -> Vec<u8> {
         // Copy mach data
 
         let mut match_length = (token & 0x0f) as u32;
+        // This little line causes segmentation fault
+        // if match offset is missing (this was the case in old implementations)
         let offset = ((src[src_index + 0] as u32) << 0) | ((src[src_index + 1] as u32) << 8);
         src_index += 2;
         let mut match_index = dest.len() - offset as usize;
