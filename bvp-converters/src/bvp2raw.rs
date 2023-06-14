@@ -2,6 +2,7 @@ use std::{env, path::Path, fs, str};
 
 use block::Block;
 use bvpfile::{File, BVPFile};
+use formats::Format;
 
 mod arguments;
 mod block;
@@ -64,6 +65,45 @@ fn get_bvp_state(files: Vec<File>) -> Result<BVPFile, String> {
     return Ok(bvp_state);
 }
 
+fn populate_volume(bvp_state: &BVPFile, current_block: usize, new_block: &mut Block, format: &Format) -> Result<(), String> {
+    for placement in &bvp_state.blocks[current_block].placements {
+        let block_index = placement.block;
+        let block = &bvp_state.blocks[block_index];
+        if block.data.is_some() {
+            let res = new_block.set_data_in_range(placement.position, block, format);
+            if res.is_err() {
+                return res;
+            };
+        } else {
+            let res = populate_volume(bvp_state, block_index, new_block, format);
+            if res.is_err() {
+                return res;
+            }
+        }
+    }
+    return Ok(());
+}
+
+fn find_format(bvp_state: &BVPFile, current_block: usize) -> Result<&Format, String> {
+    let mut stack = Vec::new();
+    stack.push(current_block);
+
+    while !stack.is_empty() {
+        let block_index = stack.pop().unwrap();
+        let block = &bvp_state.blocks[block_index];
+        if block.format.is_some() {
+            let format_index = block.format.unwrap();
+            return Ok(&bvp_state.formats[format_index]);
+        } else {
+            for placement in &block.placements {
+                let new_block_index = placement.block;
+                stack.push(new_block_index);
+            }
+        }
+    }
+    return Err("No format found".to_string());
+}
+
 
 fn main() -> Result<(), String> {
     let arguments: Vec<String> = env::args().collect();
@@ -94,26 +134,12 @@ fn main() -> Result<(), String> {
     let bvp_state = get_bvp_state(files)?;
 
     let mut name_index = 0;
-    for modality in bvp_state.modalities {
+    for modality in &bvp_state.modalities {
         let root_block_index = modality.block;
         let root_block = &bvp_state.blocks[root_block_index];
-        let format = match &root_block.format {
-            Some(format_index) => &bvp_state.formats[*format_index],
-            None => {
-                match &root_block.placements.first() { // Might be a little messy
-                    Some(f) => {
-                        let block = &bvp_state.blocks[f.block];
-                        if block.format.is_none() {
-                            // TODO: Add some error reporting here
-                            continue;
-                        }
-                        &bvp_state.formats[block.format.unwrap()]
-                    },
-                    _ => {
-                        continue;
-                    }
-                }
-            }
+        let format = match find_format(&bvp_state, root_block_index) {
+            Ok(format_index) => format_index,
+            Err(e) => return Err(e)
         };
         let root_volume_size = format.count_space(root_block.dimensions);
         let mut root_data = Vec::with_capacity(root_volume_size as usize);
@@ -124,17 +150,12 @@ fn main() -> Result<(), String> {
         let mut new_block = Block::new(root_block.dimensions, root_block.format, None);
         new_block.data = Some(root_data);
 
-        let mut error = false;
-        for placement in &bvp_state.blocks[root_block_index].placements {
-            let block_index = placement.block;
-            let block = &bvp_state.blocks[block_index];
-            if new_block.set_data_in_range(placement.position, block, &format).is_err() {
-                error = true;
-                break;
-            };
+        let res = populate_volume(&bvp_state, root_block_index, &mut new_block, format);
+        if res.is_err() {
+            return res;
         }
         
-        let volume_name = match modality.name {
+        let volume_name = match modality.name.clone() {
             Some(n) => {
                 format!("{}.raw", n)
             },
@@ -159,9 +180,6 @@ fn main() -> Result<(), String> {
             }
         };
 
-        if error {
-            break;
-        }
         name_index += 1;
     }
 

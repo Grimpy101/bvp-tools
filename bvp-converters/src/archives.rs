@@ -20,6 +20,7 @@ pub fn fill_bytes_from_usize(mut bytes: &mut [u8], n: u32) -> Result<(), String>
     };
 }
 
+// TODO: Check specs!
 pub fn to_saf_archive(files: &Vec<File>) -> Result<Vec<u8>, String> {
     let saf_signature: Vec<u8> = SAF_SIGNATURE.iter().flat_map(|e| e.to_le_bytes()).collect();
     let mut manifest = Vec::new();
