@@ -11,7 +11,13 @@ path = "src/raw2bvp.rs"
 name = "bvp2raw"
 path = "src/bvp2raw.rs"
 
+[lib]
+name = "bvp"
+path = "src/lib/lib.rs"
+
 [dependencies]
 tinyjson = "2.5.1"
 xxhash-rust = { version = "0.8.6", features = ["xxh3"] }
 chrono = { version = "0.4.26", features = ["clock"] }
+thiserror = "1.0.40"
+num-traits = "0.2.15"

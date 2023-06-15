@@ -1,19 +1,5 @@
 use std::num::Wrapping;
 
-pub enum CompressionType {
-    None,
-    LZ4S
-}
-
-impl CompressionType {
-    pub fn to_string(&self) -> String {
-        match self {
-            CompressionType::LZ4S => return "lz4s".to_string(),
-            CompressionType::None => return "raw".to_string()
-        }
-    }
-}
-
 pub fn read_u32(src: &Vec<u8>, i: usize) -> u32 {
     let b1 = src[i] as u32;
     let b2 = src[i+1] as u32;
@@ -23,7 +9,7 @@ pub fn read_u32(src: &Vec<u8>, i: usize) -> u32 {
     return b1 << 0 | b2 << 8 | b3 << 16 | b4 << 24;
 }
 
-// Bob Jenkins 4-byte integer hashing (me thinks)
+// Bob Jenkins 4-byte integer hashing (I think)
 pub fn hash_u32(x: u32) -> u32 {
     let mut x = Wrapping(x);
     x = (x + Wrapping(0x7ed55d16)) + (x <<  12);
@@ -44,7 +30,7 @@ pub fn create_hash_table() -> Vec<u32> {
     return hash_table;
 }
 
-pub fn compress_lz4s(src: &Vec<u8>) -> Result<Vec<u8>, String> {
+pub fn compress_lz4s(src: &Vec<u8>) -> Vec<u8> {
     let mut hash_table = create_hash_table(); // Table for looking up already written data
     let src_len_f64 = src.len() as f64;
     let dest_len = (src_len_f64 + (src_len_f64 / 255.0) + 16.0).floor() as usize;
@@ -157,7 +143,7 @@ pub fn compress_lz4s(src: &Vec<u8>) -> Result<Vec<u8>, String> {
         dest.push(0);
     }
 
-    return Ok(dest);
+    return dest;
 }
 
 pub fn decompress_lz4s(src: &Vec<u8>, size: usize) -> Vec<u8> {

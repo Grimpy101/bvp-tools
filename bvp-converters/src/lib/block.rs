@@ -1,21 +1,23 @@
-use std::collections::HashMap;
+use std::{collections::HashMap};
 
 use tinyjson::JsonValue;
 
-use crate::{placement::Placement, formats::Format, vector3::Vector3, json_aux::{get_u32_from_json, get_string_from_json}, bvpfile::File, compression};
+use crate::{placement::Placement, formats::Format, vector3::Vector3, json_aux::{get_u32_from_json, get_string_from_json}, file::File, errors::{BlockError, JsonError}, compressions::{CompressionType}};
 
 pub struct Block {
+    pub index: usize,
     pub dimensions: Vector3<u32>,
     pub placements: Vec<Placement>,
     pub format: Option<usize>,
     pub data: Option<Vec<u8>>,
     pub data_url: Option<String>,
-    pub encoding: Option<String>
+    pub encoding: Option<CompressionType>
 }
 
 impl Block {
-    pub fn new(dimensions: Vector3<u32>, format: Option<usize>, data: Option<Vec<u8>>) -> Self {
+    pub fn new(index: usize, dimensions: Vector3<u32>, format: Option<usize>, data: Option<Vec<u8>>) -> Self {
         return Block {
+            index,
             dimensions,
             placements: Vec::new(),
             format,
@@ -25,32 +27,40 @@ impl Block {
         }
     }
 
-    pub fn set_data_in_range(&mut self, offset: Vector3<u32>, block: &Block, format: &Format) -> Result<(), String> {
+    /// At the given offset, copy data from another block.
+    /// If blocks have defines formats, these need to be the same.
+    /// * `offset` - a vector representing offset inside target block where data of source block should start
+    /// * `block` - a source block (required to have data!)
+    /// * `format` - a format to interpret data in source block
+    pub fn set_data_in_range(&mut self, offset: Vector3<u32>, block: &Block, format: &Format) -> Result<(), BlockError> {       
         let start = offset;
         let end = offset + block.dimensions;
         let extent = end - start;
         if self.data.is_none() {
-            return Err("Target block does not have data".to_string());
+            return Err(BlockError::NoData(self.index));
+        }
+        if block.data.is_none() {
+            return Err(BlockError::NoData(block.index));
         }
         if self.format != block.format {
-            return Err("Formats of the blocks do not match".to_string());
+            return Err(BlockError::FormatMismatch(self.index, block.index));
         }
         if extent.is_any_lt(Vector3::from_xyz(0, 0, 0)) {
-            return Err("Start is greater than end".to_string());
+            return Err(BlockError::StartGreaterThanEnd(self.index, start, end));
         }
         if start.is_any_lt(Vector3::from_xyz(0, 0, 0)) {
-            return Err("Start is out of bounds".to_string());
+            return Err(BlockError::StartOutOfBounds(self.index, start));
         }
         if end.is_any_gt(self.dimensions) {
-            return Err("End is out of bounds".to_string());
+            return Err(BlockError::EndOutOfBounds(self.index, end));
         }
 
         let microblock_dimensions = format.microblock_dimensions;
         if start.is_any_div(&microblock_dimensions) {
-            return Err("Block is not on microblock boundary".to_string());
+            return Err(BlockError::BlockInvalidPosition(self.index, start, microblock_dimensions));
         }
         if extent.is_any_div(&microblock_dimensions) {
-            return Err("Block cannot contain whole microblocks".to_string());
+            return Err(BlockError::BlockInvalidSize(self.index, extent, microblock_dimensions));
         }
 
         let microblock_size = format.microblock_size;
@@ -58,27 +68,16 @@ impl Block {
         let microblock_amount_in_range = (extent / microblock_dimensions).to_u32();
         let microblock_amount_in_block = (self.dimensions / microblock_dimensions).to_u32();
 
+        let src_bytes;
         let src_original_len = format.count_space(block.dimensions) as usize;
-        // This is stupid, but we need it later
-        // so it can live long enough to be referenced by src_bytes
-        let mut decompressed_src = Vec::new();
-        let src_bytes = match &block.data {
-            Some(v) => {
-                if block.encoding.is_none() {
-                    v
-                } else {
-                    match block.encoding.as_ref().unwrap().as_str() {
-                        "raw" => v,
-                        "lz4s" => {
-                            decompressed_src = compression::decompress_lz4s(&v, src_original_len);
-                            &decompressed_src // <--- The culprit
-                        },
-                        _ => return Err("Unknown compression scheme".to_string())
-                    }
-                }
-            },
-            None => return Err("Block does not have data".to_string()),
-        };
+        let data = block.data.as_ref().unwrap();
+        let compression_scheme = &block.encoding;
+        if block.encoding.is_none() {
+            src_bytes = data.to_vec();
+        } else {
+            src_bytes = compression_scheme.as_ref().unwrap().decompress(data, src_original_len);
+        }
+
         let dest_bytes = self.data.as_mut().unwrap();
 
         for x in 0..microblock_amount_in_range.x {
@@ -100,24 +99,31 @@ impl Block {
         return Ok(());
     }
 
-    pub fn get_data_in_range(&self, start: Vector3<u32>, end: Vector3<u32>, format: &Format) -> Result<Block, String> {
+    /// Copy a portion of data from self to a new block and return it.
+    /// * `start` - position of source block (self) where the copy operation should start
+    /// * `end` - position of source block (self) where copy operation should end
+    /// * `format` - a format to interpret data in source block
+    pub fn get_data_in_range(&self, start: Vector3<u32>, end: Vector3<u32>, format: &Format) -> Result<Block, BlockError> {
         let extent = end - start;
+        if self.data.is_none() {
+            return Err(BlockError::NoData(self.index));
+        }
         if extent.is_any_lt(Vector3::from_xyz(0, 0, 0)) {
-            return Err("Start is greater than end".to_string());
+            return Err(BlockError::StartGreaterThanEnd(self.index, start, end));
         }
         if start.is_any_lt(Vector3::from_xyz(0, 0, 0)) {
-            return Err("Start is out of bounds".to_string());
+            return Err(BlockError::StartOutOfBounds(self.index, start));
         }
         if end.is_any_gt(self.dimensions) {
-            return Err("End is out of bounds".to_string());
+            return Err(BlockError::EndOutOfBounds(self.index, start));
         }
 
         let microblock_dimensions = format.microblock_dimensions;
         if start.is_any_div(&microblock_dimensions) {
-            return Err("Block is not on microblock boundary".to_string());
+            return Err(BlockError::BlockInvalidPosition(self.index, start, microblock_dimensions));
         }
         if extent.is_any_div(&microblock_dimensions) {
-            return Err("Block cannot contain whole microblocks".to_string());
+            return Err(BlockError::BlockInvalidSize(self.index, start, microblock_dimensions));
         }
 
         let microblock_size = format.microblock_size;
@@ -125,13 +131,8 @@ impl Block {
         let microblock_amount_in_range = (extent / microblock_dimensions).to_u32();
         let microblock_amount_in_block = (self.dimensions / microblock_dimensions).to_u32();
 
-        let mut block = Block::new(extent, self.format, None);
-        let src_bytes = match &self.data {
-            Some(v) => v,
-            None => {
-                return Err("Block does not have data".to_string())
-            },
-        };
+        let mut block = Block::new(0, extent, self.format, None);
+        let src_bytes = &self.data.as_ref().unwrap();
         let dest_vec_size = format.count_space(extent) as usize;
         let mut dest_bytes = Vec::with_capacity(dest_vec_size);
         // God, I sure hope dest_bytes and src_bytes are of the same size...
@@ -157,14 +158,15 @@ impl Block {
         return Ok(block);
     }
 
-    pub fn to_hashmap(&self) -> HashMap<String, JsonValue> {
+    /// Converts self to JSON object and returns JsonValue.
+    pub fn to_json(&self) -> JsonValue {
         let mut hm = HashMap::new();
         let mut placements = Vec::new();
         for placement in &self.placements {
-            placements.push(placement.to_hashmap().into());
+            placements.push(placement.to_json());
         }
         hm.insert("placements".to_string(), placements.into());
-        hm.insert("dimensions".to_string(), self.dimensions.to_f64_vec().into());
+        hm.insert("dimensions".to_string(), self.dimensions.to_json());
         if self.format.is_some() {
             hm.insert("format".to_string(), (self.format.unwrap() as f64).into());
         }
@@ -172,12 +174,92 @@ impl Block {
             hm.insert("data".to_string(), self.data_url.as_ref().unwrap().clone().into());
         }
         if self.encoding.is_some() {
-            hm.insert("encoding".to_string(), self.encoding.as_ref().unwrap().clone().into());
+            hm.insert("encoding".to_string(), self.encoding.as_ref().unwrap().to_string().into());
         }
 
-        return hm;
+        return hm.into();
     }
 
+    /// Creates a block out of JSON object and returns it.
+    /// * `index` - index of the block inside BVP manifest file
+    /// * `j` - JSON value, should be an object
+    /// * `files` - vector of volume files to pull data from
+    pub fn from_json(index: usize, j: &JsonValue, files: &Vec<File>) -> Result<Self, BlockError> {
+        // All of this is probably not optimal...
+        match j {
+            JsonValue::Object(o) => {
+                let dimensions = Vector3::<u32>::from_json(&o["dimensions"]).map_err(|x| BlockError::InvalidJson(index, x))?;
+                let mut placements = Vec::new();
+                match &o["placements"] {
+                    JsonValue::Array(a) => {
+                        for el in a {
+                            let placement = match Placement::from_json(index, &el) {
+                                Ok(p) => p,
+                                Err(e) => return Err(BlockError::InvalidPlacement(index, e))
+                            };
+                            placements.push(placement);
+                        }
+                    },
+                    _ => {
+                        return Err(BlockError::InvalidJson(index, JsonError::NotAnArray(o["placements"].clone())));
+                    }
+                };
+                let mut block = Block {
+                    index,
+                    dimensions,
+                    placements,
+                    format: None,
+                    data: None,
+                    data_url: None,
+                    encoding: None
+                };
+
+                match o.get("format") {
+                    Some(f) => {
+                        let format = get_u32_from_json(f);
+                        if format.is_err() {
+                            return Err(BlockError::InvalidJson(index, format.unwrap_err()));
+                        }
+                        block.format = Some(format.unwrap() as usize);
+                    },
+                    None => ()
+                }
+
+                match o.get("data") {
+                    Some(d) => {
+                        let data_url = match get_string_from_json(d) {
+                            Ok(d) => d,
+                            Err(e) => return Err(BlockError::InvalidJson(index, e))
+                        };
+                        let encoding = match get_string_from_json(&o["encoding"]) {
+                            Ok(e) => match CompressionType::from_string(&e) {
+                                Ok(e) => e,
+                                Err(e) => return Err(BlockError::InvalidCompression(index, e)),
+                            },
+                            Err(e) => return Err(BlockError::InvalidJson(index, e))
+                        };
+                        
+                        for file in files {
+                            if file.name == data_url {
+                                let data = file.data.to_vec();
+                                block.data_url = Some(data_url);
+                                block.encoding = Some(encoding);
+                                block.data = Some(data);
+                                break;
+                            }
+                        }
+                    },
+                    None => ()
+                }
+                return Ok(block);
+            },
+            _ => ()
+        }
+        return Err(BlockError::InvalidJson(index, JsonError::NotAnObject(j.clone())));
+    }
+
+    /// Check if data in two blocks is the same.
+    /// * `vec` - bytes of data in the other block
     pub fn is_equal_data(&self, vec: &Vec<u8>) -> bool {
         if self.data.is_none() {
             return false;
@@ -204,62 +286,5 @@ impl Block {
             data = self.data.as_ref().unwrap().len();
         }
         return format!("Block: dims {}, plc {}, data {}", dims, plc, data);
-    }
-
-    // This here is probably not optimal...
-    pub fn from_json(j: &JsonValue, files: &Vec<File>) -> Result<Self, String> {
-        match j {
-            JsonValue::Object(o) => {
-                let dimensions = Vector3::<u32>::from_json(&o["dimensions"])?;
-                let mut placements = Vec::new();
-                match &o["placements"] {
-                    JsonValue::Array(a) => {
-                        for el in a {
-                            placements.push(Placement::from_json(&el)?);
-                        }
-                    },
-                    _ => {
-                        return Err("Invalid JSON".to_string());
-                    }
-                };
-                let mut block = Block {
-                    dimensions,
-                    placements,
-                    format: None,
-                    data: None,
-                    data_url: None,
-                    encoding: None
-                };
-
-                match o.get("format") {
-                    Some(f) => {
-                        let format = get_u32_from_json(f)? as usize;
-                        block.format = Some(format);
-                    },
-                    None => ()
-                }
-
-                match o.get("data") {
-                    Some(d) => {
-                        let data_url = get_string_from_json(d)?;
-                        let encoding = get_string_from_json(&o["encoding"])?;
-                        
-                        for file in files {
-                            if file.name == data_url {
-                                let data = file.data.to_vec();
-                                block.data_url = Some(data_url);
-                                block.encoding = Some(encoding);
-                                block.data = Some(data);
-                                break;
-                            }
-                        }
-                    },
-                    None => ()
-                }
-                return Ok(block);
-            },
-            _ => ()
-        }
-        return Err("Not a valid JSON".to_string());
     }
 }

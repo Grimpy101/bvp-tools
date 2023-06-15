@@ -1,43 +1,15 @@
 use std::{env, path::Path, fs, str};
 
-use block::Block;
-use bvpfile::{File, BVPFile};
-use formats::Format;
-
-mod arguments;
-mod block;
-mod placement;
-mod formats;
-mod bvpfile;
-mod vector3;
-mod archives;
-mod compression;
-mod json_aux;
+use bvp::block::Block;
+use bvp::bvpfile::{BVPFile};
+use bvp::file::File;
+use bvp::formats::Format;
+use bvp::archives;
 
 
-fn get_files_from_dir(filepath: &Path) -> Result<Vec<File>, String> {
-    let vec = Vec::new();
-    // TODO: Implement!
-    return Ok(vec);
-}
-
-fn get_files_from_json(filepath: &Path) -> Result<Vec<File>, String> {
-    let vec = Vec::new();
-    // TODO: Implement!
-    return Ok(vec);
-}
-
-fn get_files_from_saf(filepath: &Path) -> Result<Vec<File>, String> {
-    let contents = match fs::read(filepath) {
-        Ok(v) => v,
-        Err(e) => {
-            return Err(format!("Cannot read file {}: {}", filepath.display(), e));
-        }
-    };
-    let vec = archives::from_saf_archive(&contents)?;
-    return Ok(vec);
-}
-
+/// Finds a file with given name.
+/// * `files` - a list of files
+/// * `name` - the name of the file to find
 fn find_file<'a>(files: &'a Vec<File>, name: &str) -> Option<&'a File> {
     for file in files {
         if file.name == name {
@@ -47,6 +19,8 @@ fn find_file<'a>(files: &'a Vec<File>, name: &str) -> Option<&'a File> {
     return None;
 }
 
+/// Finds a manifest file and creates BVPFile instance from it.
+/// * `files` - a list of files.
 fn get_bvp_state(files: Vec<File>) -> Result<BVPFile, String> {
     let manifest = find_file(&files, "manifest.json");
     if manifest.is_none() {
@@ -61,21 +35,27 @@ fn get_bvp_state(files: Vec<File>) -> Result<BVPFile, String> {
         },
     };
 
-    let bvp_state = BVPFile::from_manifest(content, &files)?;
+    let bvp_state = BVPFile::from_manifest(content, &files).map_err(|x| format!("{}", x))?;
     return Ok(bvp_state);
 }
 
-fn populate_volume(bvp_state: &BVPFile, current_block: usize, new_block: &mut Block, format: &Format) -> Result<(), String> {
-    for placement in &bvp_state.blocks[current_block].placements {
+/// Recursively goes through all placements and corresponding blocks,
+/// and populates destination block with data from them. Depth first.
+/// * `bvp_state` - BVP file state tracker
+/// * `current_block_index` - index of the current block (node) being traversed
+/// * `dest_block` - destination block
+/// * `format` - the format of the data
+fn populate_volume(bvp_state: &BVPFile, current_block_index: usize, dest_block: &mut Block, format: &Format) -> Result<(), String> {
+    for placement in &bvp_state.blocks[current_block_index].placements {
         let block_index = placement.block;
         let block = &bvp_state.blocks[block_index];
         if block.data.is_some() {
-            let res = new_block.set_data_in_range(placement.position, block, format);
+            let res = dest_block.set_data_in_range(placement.position, block, format);
             if res.is_err() {
-                return res;
+                return res.map_err(|x| format!("{}", x));
             };
         } else {
-            let res = populate_volume(bvp_state, block_index, new_block, format);
+            let res = populate_volume(bvp_state, block_index, dest_block, format);
             if res.is_err() {
                 return res;
             }
@@ -84,9 +64,15 @@ fn populate_volume(bvp_state: &BVPFile, current_block: usize, new_block: &mut Bl
     return Ok(());
 }
 
-fn find_format(bvp_state: &BVPFile, current_block: usize) -> Result<&Format, String> {
+/// Goes through all nodes in the tree of blocks
+/// and finds the first instance of format on a block.
+/// It is assumed that formats do not differ inside blocks
+/// of the same modality.
+/// * `bvp_state` - BVP file state tracker
+/// * `current_block`
+fn find_format(bvp_state: &BVPFile, current_block_index: usize) -> Result<&Format, String> {
     let mut stack = Vec::new();
-    stack.push(current_block);
+    stack.push(current_block_index);
 
     while !stack.is_empty() {
         let block_index = stack.pop().unwrap();
@@ -111,25 +97,7 @@ fn main() -> Result<(), String> {
         return Err("Missing input file".to_string());
     }
     let input_filepath = Path::new(arguments[1].as_str());
-    let files;
-    if input_filepath.is_dir() {
-        files = get_files_from_dir(input_filepath)?;
-    } else if input_filepath.is_file() {
-        if input_filepath.extension().is_some() {
-            let ext = input_filepath.extension().unwrap();
-            if ext == "bvp" || ext == "saf" {
-                files = get_files_from_saf(input_filepath)?;
-            } else if ext == "json" {
-                files = get_files_from_json(input_filepath)?;
-            } else {
-                return Err(format!("Invalid input: {}", input_filepath.display()));
-            }
-        } else {
-            return Err(format!("Invalid input: {}", input_filepath.display()));
-        }
-    } else {
-        return Err(format!("Invalid input: {}", input_filepath.display()));
-    }
+    let files = archives::read_archive(input_filepath).map_err(|x| format!("{}", x))?;
 
     let bvp_state = get_bvp_state(files)?;
 
@@ -147,7 +115,7 @@ fn main() -> Result<(), String> {
         // and that all blocks in the volume are provided. If a block
         // is somehow left out, the random data will not be overwritten - this is bad!
         unsafe { root_data.set_len(root_volume_size as usize); }
-        let mut new_block = Block::new(root_block.dimensions, root_block.format, None);
+        let mut new_block = Block::new(0, root_block.dimensions, root_block.format, None);
         new_block.data = Some(root_data);
 
         let res = populate_volume(&bvp_state, root_block_index, &mut new_block, format);
