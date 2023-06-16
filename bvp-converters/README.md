@@ -42,9 +42,18 @@ Of the formats, only `mono` is currently supported. The corresponding object mig
 If the `archive` option is not provided or has the value `"None"`, the files are not archived and are instead output at the location of the configuration file.
 
 ## bvp2raw
-The program accepts one parameter: the path to BVP archive file, or the path to `manifest.json` file.
+The program can be executed as follows:
 
-It outputs volume in raw data format.
+```
+bvp2raw <input_file> <archive_type>
+```
+
+* input_file - a file or folder containing BVP data (manifest and block data)
+* archive_type - a type of archive that is used. If omitted, it is read as directory. Currently, `SAF` and `ZIP` are supported.
+
+The help message can also be viewed with `--help` flag.
+
+The program outputs volume in raw data format.
 
 ## Building from source
 

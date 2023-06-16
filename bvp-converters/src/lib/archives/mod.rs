@@ -57,23 +57,24 @@ impl ArchiveEnum {
             _ => return Err(ArchiveError::NotImplemented(str))
         }
     }
-}
 
-/// Reads the archive file/folder and returns raw files inside.
-/// * `filepath` - path to file/folder to read
-pub fn read_archive(filepath: &Path) -> Result<Vec<File>, ArchiveError> {
-    if filepath.is_dir() {
-        return Err(ArchiveError::NotImplemented("folder".to_string()));
-    } else if filepath.is_file() {
-        let contents = match fs::read(filepath) {
-            Ok(v) => v,
-            Err(e) => return Err(ArchiveError::CannotRead(e.to_string()))
-        };
+    /// Reads the archive file/folder and returns raw files inside.
+    /// * `filepath` - path to file/folder to read
+    pub fn read_archive(&self, filepath: &Path) -> Result<Vec<File>, ArchiveError> {
+        if filepath.is_dir() {
+            
+        } else if filepath.is_file() {
+            let contents = match fs::read(filepath) {
+                Ok(v) => v,
+                Err(e) => return Err(ArchiveError::CannotRead(e.to_string()))
+            };
 
-        return match saf::from_saf_archive(&contents){
-            Ok(data) => Ok(data),
-            Err(e) => Err(ArchiveError::SafError(e))
-        };
+            return match self {
+                ArchiveEnum::None => Err(ArchiveError::NotImplemented("".to_string())),
+                ArchiveEnum::SAF => saf::from_saf_archive(&contents).map_err(|x| ArchiveError::SafError(x)),
+                ArchiveEnum::ZIP => zip::from_zip_archive(&contents).map_err(|x| ArchiveError::ZipError(x))
+            }
+        }
+        return Err(ArchiveError::NotValidFile(filepath.to_string_lossy().to_string()));
     }
-    return Err(ArchiveError::NotValidFile(filepath.to_string_lossy().to_string()));
 }

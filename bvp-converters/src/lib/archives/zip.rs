@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use chrono::{Datelike, Timelike};
 
 use crate::{file::File, errors::ZipError};
@@ -35,8 +37,7 @@ impl CentralDirectoryHeader {
         let mod_hour = mod_datetime.hour() as u16;
 
         let date = mod_day | (mod_month << 5) | (mod_year << 9);
-        let time = mod_second | (mod_minute << 5) | (mod_hour << 9);
-        println!("{}, {}", date, time);
+        let time = mod_second | (mod_minute << 5) | (mod_hour << 11);
 
         return Self {
             version_made: 0,
@@ -156,4 +157,85 @@ pub fn to_zip_archive(files: &Vec<File>) -> Result<Vec<u8>, ZipError> {
     zip.append(&mut eocd);
 
     return Ok(zip);
+}
+
+pub fn find_eocd(data: &Vec<u8>) -> Result<usize, ZipError> {
+    let mut i = (data.len() as i64) - 1;
+    while i - 3 >= 0 {
+        let b1 = data[(i - 3) as usize] as u32;
+        let b2 = data[(i - 2) as usize] as u32;
+        let b3 = data[(i - 1) as usize] as u32;
+        let b4 = data[i as usize] as u32;
+        let code = b4 << 24 | b3 << 16 | b2 << 8 | b1;
+        if code == EOCD_SIG {
+            return Ok((i + 1) as usize);
+        }
+        i = i - 1;
+    }
+    return Err(ZipError::CorruptFile("EOCD not found".to_string()));
+}
+
+pub fn get_u32_from_data(data: &Vec<u8>, offset: usize) -> u32 {
+    let b1 = data[offset] as u32;
+    let b2 = data[offset + 1] as u32;
+    let b3 = data[offset + 2] as u32;
+    let b4 = data[offset + 3] as u32;
+    return b1 | (b2 << 8) | (b3 << 16) | (b4 << 24);
+}
+
+pub fn get_u16_from_data(data: &Vec<u8>, offset: usize) -> u16 {
+    let b1 = data[offset] as u16;
+    let b2 = data[offset + 1] as u16;
+    return b1 | (b2 << 8);
+}
+
+pub fn get_file_from_cdfh(data: &Vec<u8>, offset: usize) -> Result<(File, usize), ZipError> {
+    let uncompressed_size = get_u32_from_data(data, offset + 24) as usize;
+    let filename_length = get_u16_from_data(data, offset + 28) as usize;
+    let extra_length = get_u16_from_data(data, offset + 30) as usize;
+    let comment_length = get_u16_from_data(data, offset + 32) as usize;
+    let file_offset = get_u32_from_data(data, offset + 42) as usize;
+    let filename_bytes = &data[(offset + 46)..(offset + 46 + filename_length)];
+    let filename = match std::str::from_utf8(filename_bytes) {
+        Ok(s) => s.to_string(),
+        Err(e) => return Err(ZipError::CorruptFile(format!("Not valid UTF ({})", e)))
+    };
+    let cdfh_size = 46 + filename_length + extra_length + comment_length;
+    let lfh_filename_length = get_u16_from_data(data, file_offset + 26);
+    let lfh_extra_length = get_u16_from_data(data, file_offset + 28);
+    let lfh_size = (30 + lfh_filename_length + lfh_extra_length) as usize;
+    
+    let mut file_data = Vec::with_capacity(uncompressed_size);
+    for i in 0..uncompressed_size {
+        file_data.push(data[file_offset + lfh_size + i]);
+    }
+
+    let file = File::new(filename, Rc::new(file_data), None);
+    return Ok((file, cdfh_size));
+}
+
+pub fn from_zip_archive(zip: &Vec<u8>) -> Result<Vec<File>, ZipError> {
+    let mut files = Vec::new();
+
+    let eocd_start = find_eocd(zip)?;
+    let records_amount = if eocd_start + 8 < zip.len() {
+        get_u16_from_data(zip, eocd_start + 6)
+    } else {
+        return Err(ZipError::CorruptFile("EOCD is missing total number of records".to_string()));
+    };
+    let central_directory_offset = if eocd_start + 16 < zip.len() {
+        get_u32_from_data(zip, eocd_start + 12) as usize
+    } else {
+        return Err(ZipError::CorruptFile("EOCD is missing central directory offset".to_string()));
+    };
+
+    let mut offset = 0usize;
+    for _ in 0..records_amount {
+        let i = central_directory_offset + offset;
+        let (file, cdfh_size) = get_file_from_cdfh(zip, i)?;
+        files.push(file);
+        offset += cdfh_size;
+    }
+
+    return Ok(files);
 }

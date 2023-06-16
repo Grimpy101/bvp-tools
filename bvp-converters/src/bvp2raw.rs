@@ -1,11 +1,12 @@
 use std::{env, path::Path, fs, str};
 
 use bvp::block::Block;
-use bvp::bvpfile::{BVPFile};
+use bvp::bvpfile::BVPFile;
 use bvp::file::File;
 use bvp::formats::Format;
-use bvp::archives;
+use bvp::archives::ArchiveEnum;
 
+static HELP: &str = "bvp2raw\n------------\n Usage: bvp2raw <input_file> [<archive type>]\n This message can be viewed with flag `--help`.";
 
 /// Finds a file with given name.
 /// * `files` - a list of files
@@ -96,8 +97,21 @@ fn main() -> Result<(), String> {
     if arguments.len() < 2 {
         return Err("Missing input file".to_string());
     }
+    
+    for arg in &arguments {
+        if arg == "--help" {
+            println!("{}", HELP);
+            return Ok(());
+        }
+    }
+
     let input_filepath = Path::new(arguments[1].as_str());
-    let files = archives::read_archive(input_filepath).map_err(|x| format!("{}", x))?;
+    let archive_tp = if arguments.len() > 2 {
+        ArchiveEnum::from_string(arguments[2].clone()).map_err(|x| format!("{}", x))?
+    } else {
+        ArchiveEnum::None
+    };
+    let files = archive_tp.read_archive(input_filepath).map_err(|x| format!("{}", x))?;
 
     let bvp_state = get_bvp_state(files)?;
 

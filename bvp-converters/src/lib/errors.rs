@@ -109,7 +109,8 @@ pub enum SafError {
 
 #[derive(Error, Debug)]
 pub enum ZipError {
-    
+    #[error("ZIP archive is corrupt: `{0}`")]
+    CorruptFile(String)
 }
 
 #[derive(Error, Debug)]
