@@ -2,9 +2,11 @@ use std::{fs, path::Path};
 use crate::{file::File, errors::ArchiveError};
 
 pub mod saf;
+pub mod zip;
 
 pub enum ArchiveEnum {
     SAF,
+    ZIP,
     None
 }
 
@@ -24,6 +26,16 @@ impl ArchiveEnum {
                     Err(e) => return Err(ArchiveError::CannotWrite(e.to_string()))
                 };
             },
+            Self::ZIP => {
+                let zip = match zip::to_zip_archive(files) {
+                    Ok(z) => z,
+                    Err(e) => return Err(ArchiveError::ZipError(e))
+                };
+                match fs::write(output_filepath, zip) {
+                    Ok(_) => (),
+                    Err(e) => return Err(ArchiveError::CannotWrite(e.to_string()))
+                }
+            },
             Self::None => {
                 for file in files {
                     match file.write() {
@@ -40,6 +52,7 @@ impl ArchiveEnum {
         // Be aware that the check first converts the string to lowercase!
         return match str.to_lowercase().as_str() {
             "saf" => Ok(ArchiveEnum::SAF),
+            "zip" => Ok(ArchiveEnum::ZIP),
             "none" => Ok(ArchiveEnum::None),
             _ => return Err(ArchiveError::NotImplemented(str))
         }
@@ -52,10 +65,6 @@ pub fn read_archive(filepath: &Path) -> Result<Vec<File>, ArchiveError> {
     if filepath.is_dir() {
         return Err(ArchiveError::NotImplemented("folder".to_string()));
     } else if filepath.is_file() {
-        if !filepath.exists() {
-            return Err(ArchiveError::DoesNotExist(filepath.to_string_lossy().to_string()));
-        }
-
         let contents = match fs::read(filepath) {
             Ok(v) => v,
             Err(e) => return Err(ArchiveError::CannotRead(e.to_string()))

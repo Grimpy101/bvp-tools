@@ -81,6 +81,8 @@ pub enum JsonError {
 pub enum ArchiveError {
     #[error("SAF error: `{0}`")]
     SafError(SafError),
+    #[error("ZIP error: `{0}`")]
+    ZipError(ZipError),
     #[error("The provided archive format is not supported (`{0}`)")]
     NotImplemented(String),
     #[error("Archive file or folder does not exist (`{0}`)")]
@@ -103,6 +105,11 @@ pub enum SafError {
     ManifestCorrupt(String),
     #[error("Invalid JSON: `{0}`")]
     InvalidJson(JsonError)
+}
+
+#[derive(Error, Debug)]
+pub enum ZipError {
+    
 }
 
 #[derive(Error, Debug)]
