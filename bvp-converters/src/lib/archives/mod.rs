@@ -3,6 +3,7 @@ use crate::{file::File, errors::ArchiveError};
 
 pub mod saf;
 pub mod zip;
+pub mod unarchived;
 
 pub enum ArchiveEnum {
     SAF,
@@ -62,17 +63,24 @@ impl ArchiveEnum {
     /// * `filepath` - path to file/folder to read
     pub fn read_archive(&self, filepath: &Path) -> Result<Vec<File>, ArchiveError> {
         if filepath.is_dir() {
-            
+            return unarchived::from_folder(filepath);
         } else if filepath.is_file() {
-            let contents = match fs::read(filepath) {
-                Ok(v) => v,
-                Err(e) => return Err(ArchiveError::CannotRead(e.to_string()))
-            };
-
             return match self {
-                ArchiveEnum::None => Err(ArchiveError::NotImplemented("".to_string())),
-                ArchiveEnum::SAF => saf::from_saf_archive(&contents).map_err(|x| ArchiveError::SafError(x)),
-                ArchiveEnum::ZIP => zip::from_zip_archive(&contents).map_err(|x| ArchiveError::ZipError(x))
+                ArchiveEnum::None => unarchived::from_manifest_file(&filepath),
+                ArchiveEnum::SAF => {
+                    let contents = match fs::read(filepath) {
+                        Ok(v) => v,
+                        Err(e) => return Err(ArchiveError::CannotRead(e.to_string()))
+                    };
+                    saf::from_saf_archive(&contents).map_err(|x| ArchiveError::SafError(x))
+                },
+                ArchiveEnum::ZIP => {
+                    let contents = match fs::read(filepath) {
+                        Ok(v) => v,
+                        Err(e) => return Err(ArchiveError::CannotRead(e.to_string()))
+                    };
+                    zip::from_zip_archive(&contents).map_err(|x| ArchiveError::ZipError(x))
+                }
             }
         }
         return Err(ArchiveError::NotValidFile(filepath.to_string_lossy().to_string()));

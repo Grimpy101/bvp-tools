@@ -13,7 +13,7 @@ static HELP: &str = "bvp2raw\n------------\n Usage: bvp2raw <input_file> [<archi
 /// * `name` - the name of the file to find
 fn find_file<'a>(files: &'a Vec<File>, name: &str) -> Option<&'a File> {
     for file in files {
-        if file.name == name {
+        if file.name.ends_with(name) {
             return Some(file);
         }
     }
