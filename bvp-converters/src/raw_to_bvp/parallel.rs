@@ -42,6 +42,12 @@ struct StageTwoPipelineResult {
  * Pipeline, stage 1
  */
 
+/// Spawn stage one thread for the pipeline.
+///
+/// This stage has a single thread that parses the input file and parameters and
+/// generates all the block ranges we need to parse the raw data into smaller blocks.
+///
+/// It then sends the "work packets" through the provided `Sender`.
 fn spawn_stage_1<'parameters: 'scope_env, 'scope, 'scope_env: 'scope>(
     scope: &'scope Scope<'scope_env>,
     stage_one_result_channel_tx: Sender<StageOnePipelineResult>,
@@ -74,6 +80,15 @@ fn spawn_stage_1<'parameters: 'scope_env, 'scope, 'scope_env: 'scope>(
  * Pipeline, stage 2
  */
 
+/// Run a worker for the stage two of the pipeline.
+///
+/// This stage uses the ranges provided by first stage and generates smaller blocks of data,
+/// performs deduplication and compresses them.
+///
+/// Block hashes, blocks themselves and placements are stored in three locked variables,
+/// `bvp_shared_block_map`, `bvp_shared_block_vec` and `bvp_shared_parent_placements_vec`.
+/// This data will be needed after the pipeline concludes to finalize the `BVPFile` instance
+/// before writing the manifest.
 fn run_stage_2_worker(
     stage_one_result_channel_rx: Arc<Receiver<StageOnePipelineResult>>,
     stage_two_result_queue_tx: Arc<Sender<StageTwoPipelineResult>>,
@@ -195,6 +210,9 @@ fn run_stage_2_worker(
     Ok(())
 }
 
+/// Spawn stage two threads for the pipeline.
+///
+/// See `run_stage_2_worker` for more information.
 fn spawn_stage_2<'scope, 'scope_env: 'scope>(
     number_of_workers: usize,
     scope: &'scope Scope<'scope_env>,
@@ -232,12 +250,6 @@ fn spawn_stage_2<'scope, 'scope_env: 'scope>(
 /*
  * Stage 3
  */
-
-trait StreamingArchiveWriter {
-    fn append_block_file(&mut self, file: File) -> Result<(), String>;
-    fn finish(self, manifest_file: File) -> Result<(), String>;
-}
-
 pub struct StreamingZIPArchiveWriter {
     zip_writer: ZipWriter<fs::File>,
 }
@@ -260,9 +272,7 @@ impl StreamingZIPArchiveWriter {
             zip_writer,
         })
     }
-}
 
-impl StreamingArchiveWriter for StreamingZIPArchiveWriter {
     fn append_block_file(&mut self, file: File) -> Result<(), String> {
         self.zip_writer.start_file(
             file.name,
@@ -301,12 +311,15 @@ impl StreamingArchiveWriter for StreamingZIPArchiveWriter {
     }
 }
 
+/// Run a worker for the stage three of the pipeline.
+///
+/// This stage receives parsed data blocks from the second stage and
+/// writes them into the .bvp (ZIP) file.
 fn run_stage_3_worker(
     stage_two_result_queue_rx: Receiver<StageTwoPipelineResult>,
     zip_writer: &mut StreamingZIPArchiveWriter,
 ) -> Result<(), String> {
-    // Pseudocode: receive parsed chunks, write to disk as the requests are coming in.
-    // when channel is dry, write the manifest
+    // Receive queued files to write and write them to disk as the requests are coming in.
     loop {
         let stage_two_work = match stage_two_result_queue_rx.recv() {
             Ok(work) => work,
@@ -324,6 +337,9 @@ fn run_stage_3_worker(
     Ok(())
 }
 
+/// Spawn stage three worker for the pipeline.
+///
+/// See `run_stage_3_worker` for more information.
 fn spawn_stage_3<'zip_writer: 'scope_env, 'scope, 'scope_env: 'scope>(
     scope: &'scope Scope<'scope_env>,
     stage_two_result_queue_rx: Receiver<StageTwoPipelineResult>,
@@ -396,6 +412,7 @@ fn finalize_bvp_zip_file(
 pub fn raw_to_bvp_parallel(
     config_file_path: &str
 ) -> Result<(), String> {
+    // Detect available cores on the system.
     let stage_two_worker_count: usize = available_parallelism()
         .map_err(|err| err.to_string())?
         .into();
@@ -436,6 +453,9 @@ pub fn raw_to_bvp_parallel(
     bvp.formats.push(parameters.input_format.clone());
     bvp.blocks.push(root_block);
 
+    // The pipeline will now have read-only access to the BVPFile.
+    // After the pipeline concludes, we'll unwrap the `Arc` and finish adding any
+    // missing fields before finalizing the .bvp file.
     let bvp_arc = Arc::new(bvp);
 
     // Initialize writer for ZIP files.
@@ -445,6 +465,15 @@ pub fn raw_to_bvp_parallel(
         .map_err(|err| err.to_string())?;
 
     // Spawn pipeline stages and wait for finish.
+    // Pipeline is made out of three stages:
+    //   - First stage (single thread) parses the input file and parameters and
+    //     generates all the block ranges we need to parse the raw data into smaller blocks.
+    //   - Second stage (as many threads as cores) uses the ranges provided by first stage
+    //     and generates smaller blocks of data, performs deduplication and compresses the data.
+    //   - Third stage (single thread) receives parsed data blocks from the second stage and
+    //     writes them into the .bvp file.
+    // The pipeline is constructed using a thread scope from `crossbeam` - stages run in parallel
+    // and each stage shuts down when it has completed all the work the previous stage can provide.
     scope(|scope| {
         // Stage 1 (parse input file and generate block ranges)
         spawn_stage_1(
@@ -479,7 +508,8 @@ pub fn raw_to_bvp_parallel(
         .map_err(|_| String::from("Scope failed to execute."))??;
 
     // Unwrap `Arc`s and `Mutex`es that must, at this point, have only one strong reference
-    // and no other threads can access them.
+    // and no other threads can access them. We could technically keep them as-is,
+    // but unwrapping into original types allows us cleaner access.
     let bvp_file = Arc::try_unwrap(bvp_arc)
         .expect("BUG: Something is holding a strong reference somehow.");
 
@@ -498,7 +528,7 @@ pub fn raw_to_bvp_parallel(
         .into_inner()
         .expect("Could not lock shared root placements vec, some thread panicked while holding the lock.");
 
-    // Write the manifest and close the zip file writer.
+    // Finalize BVPFile, generate and write the manifest and close the zip file writer.
     finalize_bvp_zip_file(
         zip_writer,
         bvp_file,
