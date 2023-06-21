@@ -1,160 +1,26 @@
-use std::{env, fs};
 use std::collections::HashMap;
+use std::fs;
 use std::io::Write;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread::available_parallelism;
-use std::time::Instant;
+
 use crossbeam::{channel, scope};
 use crossbeam::channel::{Receiver, Sender};
 use crossbeam::thread::Scope;
 use itertools::iproduct;
+use xxhash_rust::xxh3;
+use zip::{CompressionMethod, ZipWriter};
+use zip::write::FileOptions;
 
+use bvp::block::Block;
 use bvp::bvpfile::BVPFile;
 use bvp::compressions::CompressionType;
 use bvp::file::File;
 use bvp::modality::Modality;
-use xxhash_rust::xxh3;
-use zip::write::FileOptions;
-use zip::{CompressionMethod, ZipWriter};
-
-use bvp::block::Block;
 use bvp::placement::Placement;
 use bvp::vector3::Vector3;
-use crate::arguments::Parameters;
 
-mod arguments;
-
-/*
- * SEQUENTIAL IMPLEMENTATION
- */
-
-/// Iterates through blocks of data in volume,
-/// schedules unique data for writing to file,
-/// and reference data through placements
-/// 
-/// * `parent_block_i` is an index to parent block in vector *bvp_state.blocks*
-/// * `dimensions` are dimensions of volume / parent block
-/// * `block_dimensions` are dimensions of blocks inside the parent block
-/// * `format_i` is an index to a format in vector *bvp_state.formats*
-/// * `bvp_state` is a state tracking object for single BVP file
-fn volume2block(parent_block_index: usize, dimensions: Vector3<u32>, block_dimensions: Vector3<u32>, format_index: usize, encoding: CompressionType, bvp_state: &mut BVPFile) -> Result<(), String> {
-    
-    let block_count = (dimensions / block_dimensions).ceil();
-    let format = &bvp_state.formats[format_index];
-
-    for x in 0..block_count.x {
-        for y in 0..block_count.y {
-            for z in 0..block_count.z {
-                let block_start = block_dimensions * Vector3::from_xyz(x, y, z);
-                let block_end = (block_start + block_dimensions).min(&dimensions);
-
-                let block = (&bvp_state.blocks[parent_block_index]).get_data_in_range(block_start, block_end, format).map_err(|x| format!("{}", x))?;
-                let block_data = match block.data {
-                    Some(d) => d,
-                    None => {
-                        return Err("Block does not have data".to_string());
-                    }
-                };
-
-                let block_hash = xxh3::xxh3_64(&block_data[..]);
-
-                // Check if block with the same data exists.
-                // Data hashes are compared, since this is faster.
-                // If hashes are equal, raw data is compared in case of collisions.
-                let exists;
-                let mut block_id = 0;
-                match bvp_state.block_map.get(&block_hash) {
-                    Some(bi) => {
-                        let hashed_block = &bvp_state.blocks[*bi];
-                        if hashed_block.is_equal_data(&block_data) {
-                            exists = true;
-                            block_id = *bi;
-                        } else {
-                            exists = false;
-                        }
-                    },
-                    None => {
-                        exists = false;
-                    }
-                };
-
-                if !exists {
-                    // Schedule block for writing to file and store its index
-                    block_id = bvp_state.blocks.len();
-                    let block_url = format!("blocks/block_{}.raw", block_id);
-                    bvp_state.block_map.insert(block_hash, block_id);
-                    let mut new_block = Block::new(block_id, block.dimensions, Some(format_index), None);
-                    new_block.encoding = Some(encoding);
-                    new_block.format = bvp_state.blocks[parent_block_index].format;
-                    new_block.data_url = Some(block_url.clone());
-                    bvp_state.blocks.push(new_block);
-
-                    let block_data = encoding.compress(block_data);
-
-                    bvp_state.files.push(File::new(block_url, Arc::new(block_data), None));
-                }
-
-                bvp_state.blocks[parent_block_index].placements.push(Placement::new(block_start, block_id.clone()));
-
-            }
-        }
-    }
-
-    return Ok(());
-}
-
-fn read_input_file(filepath: &str) -> Result<Vec<u8>, String> {
-    match fs::read(filepath) {
-        Ok(v) => {
-            return Ok(v);
-        },
-        Err(_) => {
-            return Err("Could not read file".to_string());
-        }
-    }
-}
-
-fn raw_to_bvp_sequential(
-    config_file_path: &str
-) -> Result<(), String> {
-    let parameters = arguments::parse_config(config_file_path).map_err(|x| format!("{}", x))?;
-    let input_data = read_input_file(&parameters.input_file)?;
-    let mut bvp_file = BVPFile::new();
-    bvp_file.formats.push(parameters.input_format);
-    let root_block_index = 0;
-
-    bvp_file.modalities.push(Modality::new(
-        parameters.name.clone(), parameters.description.clone(), parameters.semantic_type,
-        parameters.volume_scale, parameters.voxel_scale, root_block_index
-    ));
-    bvp_file.asset.author = parameters.author;
-    bvp_file.asset.copyright = parameters.copyright;
-    bvp_file.asset.acquisition_time = parameters.acquisition_time;
-    bvp_file.asset.generator = Some("raw2bvp script".to_string());  // TODO: Change to more interesting name
-    bvp_file.asset.name = parameters.name;
-    bvp_file.asset.description = parameters.description;
-
-    // Create volume root block to populate with smaller blocks
-    let parent_block_index = bvp_file.blocks.len();
-    let parent_block = Block::new(parent_block_index, parameters.dimensions, Some(root_block_index), Some(input_data));
-    bvp_file.blocks.push(parent_block);
-
-    volume2block(0, parameters.dimensions, parameters.block_dimensions, root_block_index, parameters.compression, &mut bvp_file)?;
-
-    let time = chrono::offset::Utc::now();
-    bvp_file.asset.creation_time = Some(time.timestamp().to_string()); // IN ISO format!!!
-    bvp_file.files.push(File::new("manifest.json".to_string(), Arc::new(bvp_file.to_manifest()?), Some("application/json".to_string())));
-
-    parameters.archive.write_files(&bvp_file.files, parameters.output_file).map_err(|x| format!("{}", x))?;
-
-    Ok(())
-}
-
-
-/*
- * PARALLEL IMPLEMENTATION
- */
 
 struct StageOnePipelineResult {
     pub block_start: Vector3<u32>,
@@ -163,6 +29,15 @@ struct StageOnePipelineResult {
     pub format_index: usize,
     pub parent_block_index: usize,
 }
+
+struct StageTwoPipelineResult {
+    file_to_write: File,
+}
+
+
+/*
+ * Pipeline, stage 1
+ */
 
 fn spawn_stage_1<'parameters: 'scope_env, 'scope, 'scope_env: 'scope>(
     scope: &'scope Scope<'scope_env>,
@@ -192,16 +67,9 @@ fn spawn_stage_1<'parameters: 'scope_env, 'scope, 'scope_env: 'scope>(
 }
 
 
-enum BlockEncodingResult {
-    AlreadyExists,
-    NewFile {
-        file: File,
-    }
-}
-
-struct StageTwoPipelineResult {
-    encoding_result: BlockEncodingResult,
-}
+/*
+ * Pipeline, stage 2
+ */
 
 fn run_stage_2_worker(
     stage_one_result_channel_rx: Arc<Receiver<StageOnePipelineResult>>,
@@ -269,11 +137,6 @@ fn run_stage_2_worker(
                     ));
                 }
 
-                stage_two_result_queue_tx.send(StageTwoPipelineResult {
-                    encoding_result: BlockEncodingResult::AlreadyExists
-                })
-                    .expect("Stage two result channel could not send! Did stage 3 drop the receiver?");
-
                 continue;
             }
         }
@@ -317,16 +180,13 @@ fn run_stage_2_worker(
         }
 
         stage_two_result_queue_tx.send(StageTwoPipelineResult {
-            encoding_result: BlockEncodingResult::NewFile {
-                file: File::new(
-                    block_url,
-                    Arc::new(compressed_block_data),
-                    None,
-                ),
-            }
+            file_to_write: File::new(
+                block_url,
+                Arc::new(compressed_block_data),
+                None,
+            )
         })
             .expect("Stage two could not send! Did stage three drop receiver?");
-
     }
 
     Ok(())
@@ -365,6 +225,11 @@ fn spawn_stage_2<'scope, 'scope_env: 'scope>(
     }
 }
 
+
+/*
+ * Stage 3
+ */
+
 trait StreamingArchiveWriter {
     fn append_block_file(&mut self, file: File) -> Result<(), String>;
     fn finish(self, manifest_file: File) -> Result<(), String>;
@@ -384,7 +249,7 @@ impl StreamingZIPArchiveWriter {
         zip_writer.add_directory(
             "blocks",
             FileOptions::default()
-                .compression_method(CompressionMethod::Stored)
+                .compression_method(CompressionMethod::Stored),
         )
             .map_err(|err| err.to_string())?;
 
@@ -399,7 +264,7 @@ impl StreamingArchiveWriter for StreamingZIPArchiveWriter {
         self.zip_writer.start_file(
             file.name,
             FileOptions::default()
-                .compression_method(CompressionMethod::Stored)
+                .compression_method(CompressionMethod::Stored),
         )
             .map_err(|err| err.to_string())?;
 
@@ -414,7 +279,7 @@ impl StreamingArchiveWriter for StreamingZIPArchiveWriter {
         self.zip_writer.start_file(
             manifest_file.name,
             FileOptions::default()
-                .compression_method(CompressionMethod::Stored)
+                .compression_method(CompressionMethod::Stored),
         )
             .map_err(|err| err.to_string())?;
 
@@ -455,7 +320,7 @@ fn run_stage_3_worker(
                 zip_writer
                     .append_block_file(file)?;
             }
-            BlockEncodingResult::AlreadyExists => {},
+            BlockEncodingResult::AlreadyExists => {}
         };
     }
 
@@ -476,6 +341,11 @@ fn spawn_stage_3<'zip_writer: 'scope_env, 'scope, 'scope_env: 'scope>(
 
     Ok(())
 }
+
+
+/*
+ * Other
+ */
 
 fn finalize_bvp_zip_file(
     zip_writer: StreamingZIPArchiveWriter,
@@ -522,7 +392,11 @@ fn finalize_bvp_zip_file(
     Ok(())
 }
 
-fn raw_to_bvp_parallel(
+/*
+ * Entry function
+ */
+
+pub fn raw_to_bvp_parallel(
     config_file_path: &str
 ) -> Result<(), String> {
     let stage_two_worker_count: usize = available_parallelism()
@@ -575,7 +449,7 @@ fn raw_to_bvp_parallel(
 
     // Spawn pipeline stages and wait for finish.
     scope(|scope| {
-        // Stage 1
+        // Stage 1 (parse input file and generate block ranges)
         spawn_stage_1(
             scope,
             stage_one_result_channel_tx,
@@ -583,7 +457,7 @@ fn raw_to_bvp_parallel(
             root_block_format_index,
         );
 
-        // Stage 2
+        // Stage 2 (parse smaller blocks, deduplicate and compress)
         spawn_stage_2(
             stage_two_worker_count,
             scope,
@@ -596,7 +470,7 @@ fn raw_to_bvp_parallel(
             parameters.compression,
         );
 
-        // Stage 3
+        // Stage 3 (write queued files to zip)
         spawn_stage_3(
             scope,
             stage_two_result_channel_rx,
@@ -607,8 +481,8 @@ fn raw_to_bvp_parallel(
     })
         .map_err(|_| String::from("Scope failed to execute."))??;
 
-    // Unwrap `Arc`s and `Mutex`es that must at this point have only strong references and
-    // no other threads can access them.
+    // Unwrap `Arc`s and `Mutex`es that must, at this point, have only one strong reference
+    // and no other threads can access them.
     let bvp_file = Arc::try_unwrap(bvp_arc)
         .expect("BUG: Something is holding a strong reference somehow.");
 
@@ -639,35 +513,5 @@ fn raw_to_bvp_parallel(
     )?;
 
     Ok(())
-}
-
-
-
-
-/*
- * MAIN
- */
-
-fn main() -> Result<(), String> {
-    let arguments: Vec<String> = env::args().collect();
-    if arguments.len() < 2 {
-        return Err("Missing JSON config file".to_string());
-    }
-
-    // let time_sequential_start = Instant::now();
-    // raw_to_bvp_sequential(&arguments[1])?;
-    // println!(
-    //     "Sequential execution time: {:.5}",
-    //     time_sequential_start.elapsed().as_secs_f64()
-    // );
-
-    let time_parallel_start = Instant::now();
-    raw_to_bvp_parallel(&arguments[1])?;
-    println!(
-        "Parallel execution time: {:.5}",
-        time_parallel_start.elapsed().as_secs_f64()
-    );
-
-    return Ok(());
 }
 
