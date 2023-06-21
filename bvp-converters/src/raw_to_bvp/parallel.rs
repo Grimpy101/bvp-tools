@@ -20,6 +20,9 @@ use bvp::file::File;
 use bvp::modality::Modality;
 use bvp::placement::Placement;
 use bvp::vector3::Vector3;
+use crate::arguments;
+use crate::arguments::Parameters;
+use crate::raw_to_bvp::read_input_file;
 
 
 struct StageOnePipelineResult {
@@ -314,14 +317,8 @@ fn run_stage_3_worker(
             }
         };
 
-
-        match stage_two_work.encoding_result {
-            BlockEncodingResult::NewFile { file } => {
-                zip_writer
-                    .append_block_file(file)?;
-            }
-            BlockEncodingResult::AlreadyExists => {}
-        };
+        zip_writer
+            .append_block_file(stage_two_work.file_to_write)?;
     }
 
     Ok(())

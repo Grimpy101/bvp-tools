@@ -1,4 +1,3 @@
-use std::fs;
 use std::sync::Arc;
 use xxhash_rust::xxh3;
 use bvp::block::Block;
@@ -8,6 +7,8 @@ use bvp::file::File;
 use bvp::modality::Modality;
 use bvp::placement::Placement;
 use bvp::vector3::Vector3;
+use crate::arguments;
+use crate::raw_to_bvp::read_input_file;
 
 /// Iterates through blocks of data in volume,
 /// schedules unique data for writing to file,
@@ -82,17 +83,6 @@ fn volume2block(parent_block_index: usize, dimensions: Vector3<u32>, block_dimen
     }
 
     return Ok(());
-}
-
-fn read_input_file(filepath: &str) -> Result<Vec<u8>, String> {
-    match fs::read(filepath) {
-        Ok(v) => {
-            return Ok(v);
-        },
-        Err(_) => {
-            return Err("Could not read file".to_string());
-        }
-    }
 }
 
 pub fn raw_to_bvp_sequential(

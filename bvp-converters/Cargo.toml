@@ -5,7 +5,7 @@ edition = "2021"
 
 [[bin]]
 name = "raw2bvp"
-path = "src/raw2bvp/main.rs"
+path = "src/raw2bvp.rs"
 
 [[bin]]
 name = "bvp2raw"
