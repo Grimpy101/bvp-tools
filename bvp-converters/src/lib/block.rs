@@ -4,6 +4,7 @@ use tinyjson::JsonValue;
 
 use crate::{placement::Placement, formats::Format, vector3::Vector3, json_aux::{get_u32_from_json, get_string_from_json}, file::File, errors::{BlockError, JsonError}, compressions::{CompressionType}};
 
+#[derive(Debug)]
 pub struct Block {
     pub index: usize,
     pub dimensions: Vector3<u32>,

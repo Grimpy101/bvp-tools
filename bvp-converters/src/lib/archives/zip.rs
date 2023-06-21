@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use chrono::{Datelike, Timelike};
 
@@ -210,7 +210,7 @@ pub fn get_file_from_cdfh(data: &Vec<u8>, offset: usize) -> Result<(File, usize)
         file_data.push(data[file_offset + lfh_size + i]);
     }
 
-    let file = File::new(filename, Rc::new(file_data), None);
+    let file = File::new(filename, Arc::new(file_data), None);
     return Ok((file, cdfh_size));
 }
 

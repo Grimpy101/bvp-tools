@@ -1,13 +1,11 @@
-use std::{rc::Rc, env, fs};
+use std::{env, fs};
 use std::collections::HashMap;
-use std::ffi::OsString;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
-use crossbeam::queue::ArrayQueue;
+use std::time::Instant;
 use crossbeam::{channel, scope};
-use crossbeam::channel::{Receiver, RecvError, Sender};
-use crossbeam::sync::ShardedLock;
+use crossbeam::channel::{Receiver, Sender};
 use crossbeam::thread::Scope;
 use itertools::iproduct;
 
@@ -20,8 +18,6 @@ use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
 use bvp::block::Block;
-use bvp::atomic_token::AtomicBoolToken;
-use bvp::errors::ArchiveError;
 use bvp::placement::Placement;
 use bvp::vector3::Vector3;
 use crate::arguments::Parameters;
@@ -59,6 +55,7 @@ fn volume2block(parent_block_index: usize, dimensions: Vector3<u32>, block_dimen
                         return Err("Block does not have data".to_string());
                     }
                 };
+
                 let block_hash = xxh3::xxh3_64(&block_data[..]);
 
                 // Check if block with the same data exists.
@@ -94,10 +91,11 @@ fn volume2block(parent_block_index: usize, dimensions: Vector3<u32>, block_dimen
 
                     let block_data = encoding.compress(block_data);
 
-                    bvp_state.files.push(File::new(block_url, Rc::new(block_data), None));
+                    bvp_state.files.push(File::new(block_url, Arc::new(block_data), None));
                 }
 
                 bvp_state.blocks[parent_block_index].placements.push(Placement::new(block_start, block_id.clone()));
+
             }
         }
     }
@@ -145,7 +143,7 @@ fn raw_to_bvp_sequential(
 
     let time = chrono::offset::Utc::now();
     bvp_file.asset.creation_time = Some(time.timestamp().to_string()); // IN ISO format!!!
-    bvp_file.files.push(File::new("manifest.json".to_string(), Rc::new(bvp_file.to_manifest()?), Some("application/json".to_string())));
+    bvp_file.files.push(File::new("manifest.json".to_string(), Arc::new(bvp_file.to_manifest()?), Some("application/json".to_string())));
 
     parameters.archive.write_files(&bvp_file.files, parameters.output_file).map_err(|x| format!("{}", x))?;
 
@@ -165,38 +163,17 @@ struct StageOnePipelineResult {
     pub parent_block_index: usize,
 }
 
-fn spawn_stage_1<'scope>(
-    scope: &'scope Scope<'scope>,
+fn spawn_stage_1<'parameters: 'scope_env, 'scope, 'scope_env: 'scope>(
+    scope: &'scope Scope<'scope_env>,
     stage_one_result_channel_tx: Sender<StageOnePipelineResult>,
-    bvp_file: Arc<BVPFile>,
-    parameters: &Parameters,
+    parameters: &'parameters Parameters,
+    root_block_format: usize,
 ) {
-    scope.spawn(|_| {
-        bvp_file.formats.push(parameters.input_format.clone());
-
-        let raw_input_data = read_input_file(&parameters.input_file)?;
-
-        // FIXME Not sure how this `format` works, used constant value
-        //       in `root_block_index` from sequential implementation.
-        let root_block_format: usize = 0;
-
-        let parent_block_index = bvp_file.blocks.len();
-        let parent_block = Block::new(
-            parent_block_index,
-            parameters.dimensions,
-            Some(root_block_format),
-            Some(raw_input_data),
-        );
-
-        bvp_file.blocks.push(parent_block);
-
-
+    scope.spawn(move |_| {
         let dimensions = parameters.dimensions;
         let block_dimensions = parameters.block_dimensions;
-        let compression = parameters.compression;
 
         let block_count = (dimensions / block_dimensions).ceil();
-
 
         for (x, y, z) in iproduct!(0..block_count.x, 0..block_count.y, 0..block_count.z) {
             let block_start = block_dimensions * Vector3::from_xyz(x, y, z);
@@ -215,12 +192,9 @@ fn spawn_stage_1<'scope>(
 
 
 enum BlockEncodingResult {
-    AlreadyExists {
-        placement: Placement,
-    },
+    AlreadyExists,
     NewFile {
         file: File,
-        placement: Placement,
     }
 }
 
@@ -228,138 +202,166 @@ struct StageTwoPipelineResult {
     encoding_result: BlockEncodingResult,
 }
 
-
-fn spawn_stage_2<'scope>(
-    scope: &'scope Scope<'scope>,
+fn run_stage_2_worker(
     stage_one_result_channel_rx: Arc<Receiver<StageOnePipelineResult>>,
     stage_two_result_queue_tx: Arc<Sender<StageTwoPipelineResult>>,
     bvp_shared_block_map: Arc<Mutex<HashMap<u64, usize>>>,
     bvp_shared_block_vec: Arc<Mutex<Vec<Block>>>,
+    bvp_shared_parent_placements_vec: Arc<Mutex<Vec<Placement>>>,
+    bvp_file: Arc<BVPFile>,
+    encoding: CompressionType,
+) -> Result<(), String> {
+    // Parses blocks to be saved in separate files (and performs deduplication).
+    loop {
+        let prepared_work = match stage_one_result_channel_rx.recv() {
+            Ok(work) => work,
+            Err(_) => {
+                // This happens when the channel sender has been dropped and there is
+                // no more work to receive.
+                break;
+            }
+        };
+
+        let format = &bvp_file.formats[prepared_work.format_index];
+        let block = bvp_file.blocks[prepared_work.parent_block_index]
+            .get_data_in_range(
+                prepared_work.block_start,
+                prepared_work.block_end,
+                format,
+            )
+            .map_err(|err| err.to_string())?;
+
+        let block_data = block.data
+            .ok_or_else(|| String::from("Block does not have data!"))?;
+        let block_format_index = block.format;
+
+        let block_data_hash = xxh3::xxh3_64(block_data.as_slice());
+
+        /*
+         * Here begins a locked segment (only one thread at a time), which is required
+         * if we want to preserve deduplication.
+         */
+        let mut locked_blocks_map = bvp_shared_block_map.lock()
+            .expect("Shared Block index map Mutex lock has been poisoned!");
+        let mut locked_blocks_vec = bvp_shared_block_vec.lock()
+            .expect("Shared Block vector Mutex lock has been poisoned!");
+
+        // Check if block with the same hash exists.
+        // If a hash collision is found, compare the raw data before assuming
+        // the blocks are actually the same.
+        if let Some(same_hash_block_id) = locked_blocks_map.get(&block_data_hash)
+        {
+            // TODO Maybe replace this with sharded lock for better reads
+            let same_hash_block_data: &Block = locked_blocks_vec
+                .get(*same_hash_block_id)
+                .expect("Block with given index did not exist in vector.");
+
+            if same_hash_block_data.is_equal_data(&block_data) {
+                // Real collision, we can deduplicate and don't need to write another file.
+                {
+                    let mut locked_placements = bvp_shared_parent_placements_vec.lock()
+                        .expect("Some thread panicked while holding shared Placements vec.");
+
+                    locked_placements.push(Placement::new(
+                        prepared_work.block_start,
+                        *same_hash_block_id,
+                    ));
+                }
+
+                stage_two_result_queue_tx.send(StageTwoPipelineResult {
+                    encoding_result: BlockEncodingResult::AlreadyExists
+                })
+                    .expect("Stage two result channel could not send! Did stage 3 drop the receiver?");
+
+                continue;
+            }
+        }
+
+        // No collision and no possibility of deduplication,
+        // schedule block for writing to file and store its index.
+        let block_id = locked_blocks_vec.len() + 1;
+        let block_url = format!("blocks/block_{}.raw", block_id);
+
+        locked_blocks_map.insert(block_data_hash, block_id);
+
+        let mut new_block = Block::new(
+            block_id,
+            block.dimensions,
+            Some(prepared_work.format_index),
+            None,
+        );
+
+        new_block.encoding = Some(encoding);
+        new_block.format = block_format_index;
+        new_block.data_url = Some(block_url.clone());
+
+        locked_blocks_vec.push(new_block);
+
+        drop(locked_blocks_vec);
+        drop(locked_blocks_map);
+        /*
+         * Here ends the locked segment.
+         */
+
+        let compressed_block_data = encoding.compress(block_data);
+
+        {
+            let mut locked_placements = bvp_shared_parent_placements_vec.lock()
+                .expect("Some thread panicked while holding shared Placements vec.");
+
+            locked_placements.push(Placement::new(
+                prepared_work.block_start,
+                block_id,
+            ));
+        }
+
+        stage_two_result_queue_tx.send(StageTwoPipelineResult {
+            encoding_result: BlockEncodingResult::NewFile {
+                file: File::new(
+                    block_url,
+                    Arc::new(compressed_block_data),
+                    None,
+                ),
+            }
+        })
+            .expect("Stage two could not send! Did stage three drop receiver?");
+
+    }
+
+    Ok(())
+}
+
+fn spawn_stage_2<'scope, 'scope_env: 'scope>(
+    number_of_workers: usize,
+    scope: &'scope Scope<'scope_env>,
+    stage_one_result_channel_rx: Arc<Receiver<StageOnePipelineResult>>,
+    stage_two_result_queue_tx: Arc<Sender<StageTwoPipelineResult>>,
+    bvp_shared_block_map: Arc<Mutex<HashMap<u64, usize>>>,
+    bvp_shared_block_vec: Arc<Mutex<Vec<Block>>>,
+    bvp_shared_parent_placements_vec: Arc<Mutex<Vec<Placement>>>,
     bvp_file: Arc<BVPFile>,
     encoding: CompressionType,
 ) {
-    // TODO spawn more than one thread
-    scope.spawn(|_| {
-        // Pseudocode: parse blocks to be saved in separate files
+    for _ in 0..number_of_workers {
+        let stage_one_result_channel_rx_clone = stage_one_result_channel_rx.clone();
+        let stage_two_result_queue_tx_clone = stage_two_result_queue_tx.clone();
+        let bvp_shared_block_map_clone = bvp_shared_block_map.clone();
+        let bvp_shared_block_vec_clone = bvp_shared_block_vec.clone();
+        let bvp_shared_parent_placements_vec_clone = bvp_shared_parent_placements_vec.clone();
+        let bvp_file_clone = bvp_file.clone();
 
-        loop {
-            let prepared_work = match stage_one_result_channel_rx.recv() {
-                Ok(work) => work,
-                Err(_) => {
-                    // This happens when the channel sender has been dropped and there is
-                    // no more work to receive.
-                    break;
-                }
-            };
-
-            let (block_data, format_index) = {
-                let locked_bvp = bvp_file.read()
-                    .expect("BUG: already held by current thread.");
-
-                let format = &locked_bvp.formats[prepared_work.format_index];
-                let block = locked_bvp.blocks[prepared_work.parent_block_index]
-                    .get_data_in_range(
-                        prepared_work.block_start,
-                        prepared_work.block_end,
-                        format,
-                    )
-                    .map_err(|err| err.to_string())?;
-
-                (
-                    block.data
-                        .ok_or_else(|| String::from("Block does not have data!"))?,
-                    block.format
-                )
-            };
-
-            let block_data_hash = xxh3::xxh3_64(block_data.as_slice());
-
-            /*
-             * Here begins a locked segment (only one thread at a time), which is required
-             * if we want to preserve deduplication.
-             */
-            let mut locked_blocks_map = bvp_shared_block_map.lock()
-                .expect("Shared Block index map Mutex lock has been poisoned!");
-            let mut locked_blocks_vec = bvp_shared_block_vec.lock()
-                .expect("Shared Block vector Mutex lock has been poisoned!");
-
-            // Check if block with the same hash exists.
-            // If a hash collision is found, compare the raw data before assuming
-            // the blocks are actually the same.
-            if let Some(same_hash_block_id) = locked_blocks_map.get(&block_data_hash)
-            {
-                // TODO Maybe replace this with sharded lock for better reads
-                let same_hash_block_data: &Block = bvp_shared_block_vec
-                    .lock()
-                    .expect("Block vec Mutex lock has been poisoned!")
-                    .get(same_hash_block_id)
-                    .expect("Block with given index did not exist in vector.");
-
-                if same_hash_block_data.is_equal_data(&block_data) {
-                    // Real collision, we can deduplicate.
-                    stage_two_result_queue_tx.send(StageTwoPipelineResult {
-                        encoding_result: BlockEncodingResult::AlreadyExists {
-                            placement: Placement::new(
-                                prepared_work.block_start,
-                                *same_hash_block_id
-                            )
-                        }
-                    })
-                        .expect("Stage two result channel could not send! Did stage 3 drop the receiver?");
-
-                    continue;
-                }
-            }
-
-            // No collision and no possibility of deduplication,
-            // schedule block for writing to file and store its index.
-            let block_id = locked_blocks_vec.len();
-            let block_url = format!("blocks/block_{}.raw", block_id);
-
-            locked_blocks_map.insert(block_data_hash, block_id);
-
-            let mut new_block = Block::new(
-                block_id,
-                block.dimensions,
-                Some(prepared_work.format_index),
-                None,
-            );
-
-            new_block.encoding = Some(encoding);
-            new_block.format = format_index;
-            new_block.data_url = Some(block_url.clone());
-
-            locked_blocks_vec.push(new_block);
-
-            drop(locked_blocks_vec);
-            drop(locked_blocks_map);
-            /*
-             * Here ends the locked segment.
-             */
-
-            let compressed_block_data = encoding.compress(block_data);
-
-            stage_two_result_queue_tx.send(StageTwoPipelineResult {
-                encoding_result: BlockEncodingResult::NewFile {
-                    file: File::new(
-                        block_url,
-                        Rc::new(compressed_block_data),
-                        None,
-                    ),
-                    placement: Placement::new(
-                        prepared_work.block_start,
-                        block_id,
-                    ),
-                }
-            })
-                .expect("Stage two could not send! Did stage three drop receiver?");
-
-        }
-
-        if !stage_two_finished_token.is_true() {
-            stage_two_finished_token.set_true();
-        }
-    });
+        scope.spawn(move |_| {
+            run_stage_2_worker(
+                stage_one_result_channel_rx_clone,
+                stage_two_result_queue_tx_clone,
+                bvp_shared_block_map_clone,
+                bvp_shared_block_vec_clone,
+                bvp_shared_parent_placements_vec_clone,
+                bvp_file_clone,
+                encoding,
+            )
+        });
+    }
 }
 
 trait StreamingArchiveWriter {
@@ -419,53 +421,69 @@ impl StreamingArchiveWriter for StreamingZIPArchiveWriter {
             .write_all(manifest_file.data.as_slice())
             .map_err(|err| err.to_string())?;
 
+        let mut inner_file = self.zip_writer
+            .finish()
+            .map_err(|err| err.to_string())?;
 
-        self.output_file.flush()
-            .map_err(|e| e.to_string())
+        inner_file.flush()
+            .map_err(|err| err.to_string())?;
+
+        Ok(())
     }
 }
 
-
-fn spawn_stage_3<'scope, P: AsRef<Path>>(
-    scope: &'scope Scope<'scope>,
+fn run_stage_3_worker(
     stage_two_result_queue_rx: Receiver<StageTwoPipelineResult>,
     zip_writer: &mut StreamingZIPArchiveWriter,
 ) -> Result<(), String> {
+    // Pseudocode: receive parsed chunks, write to disk as the requests are coming in.
+    // when channel is dry, write the manifest
+    loop {
+        let stage_two_work = match stage_two_result_queue_rx.recv() {
+            Ok(work) => work,
+            Err(_) => {
+                // This happens when the channel sender has been dropped and there is
+                // no more work to receive.
+                break;
+            }
+        };
 
-    scope.spawn(|_| {
-        // Pseudocode: receive parsed chunks, write to disk as the requests are coming in.
-        // when channel is dry, write the manifest
-        loop {
-            let stage_two_work = match stage_two_result_queue_rx.recv() {
-                Ok(work) => work,
-                Err(_) => {
-                    // This happens when the channel sender has been dropped and there is
-                    // no more work to receive.
-                    break;
-                }
-            };
 
-            let placement = match stage_two_work.encoding_result {
-                BlockEncodingResult::NewFile { file, placement } => {
-                    zip_writer
-                        .append_block_file(file)?;
+        match stage_two_work.encoding_result {
+            BlockEncodingResult::NewFile { file } => {
+                zip_writer
+                    .append_block_file(file)?;
+            }
+            BlockEncodingResult::AlreadyExists => {},
+        };
+    }
 
-                    placement
-                }
-                BlockEncodingResult::AlreadyExists { placement } => placement
-            };
+    Ok(())
+}
 
-            // TODO placement?
-        }
-
+fn spawn_stage_3<'zip_writer: 'scope_env, 'scope, 'scope_env: 'scope>(
+    scope: &'scope Scope<'scope_env>,
+    stage_two_result_queue_rx: Receiver<StageTwoPipelineResult>,
+    zip_writer: &'zip_writer mut StreamingZIPArchiveWriter,
+) -> Result<(), String> {
+    scope.spawn(move |_| {
+        run_stage_3_worker(
+            stage_two_result_queue_rx,
+            zip_writer,
+        )
     });
 
     Ok(())
 }
 
 fn finalize_bvp_zip_file(
-    mut zip_writer: StreamingZIPArchiveWriter,
+    zip_writer: StreamingZIPArchiveWriter,
     mut bvp_file: BVPFile,
+    bvp_block_map: HashMap<u64, usize>,
+    bvp_block_vec: Vec<Block>,
+    root_block_index: usize,
+    bvp_root_block_placements_vec: Vec<Placement>,
+    parameters: &Parameters,
 ) -> Result<(), String> {
     bvp_file.modalities.push(Modality::new(
         parameters.name.clone(),
@@ -486,16 +504,15 @@ fn finalize_bvp_zip_file(
     let time = chrono::offset::Utc::now();
     bvp_file.asset.creation_time = Some(time.timestamp().to_string()); // IN ISO format!!!
 
-    bvp_file.block_map = blocks_map;
-    bvp_file.blocks = blocks_vec;
-
-    bvp_file.files.extend(bvp_file_list.into_iter());
+    bvp_file.block_map = bvp_block_map;
+    bvp_file.blocks.extend(bvp_block_vec);
+    bvp_file.blocks[root_block_index].placements = bvp_root_block_placements_vec;
 
 
     let manifest_data = bvp_file.to_manifest()?;
     let manifest_file = File::new(
         "manifest.json".to_string(),
-        Rc::new(manifest_data),
+        Arc::new(manifest_data),
         Some("application/json".to_string()),
     );
 
@@ -507,7 +524,9 @@ fn finalize_bvp_zip_file(
 fn raw_to_bvp_parallel(
     config_file_path: &str
 ) -> Result<(), String> {
-    // Set up inter-stage channels/queues.
+    const STAGE_TWO_WORKER_COUNT: usize = 16;
+
+    // Set up inter-stage channels/queues/maps/vectors.
     let (stage_one_result_channel_tx, stage_one_result_channel_rx) =
         channel::unbounded::<StageOnePipelineResult>();
     let stage_one_result_channel_rx_arc = Arc::new(stage_one_result_channel_rx);
@@ -518,31 +537,59 @@ fn raw_to_bvp_parallel(
 
     let bvp_shared_block_map: Arc<Mutex<HashMap<u64, usize>>> = Arc::new(Mutex::new(HashMap::new()));
     let bvp_shared_block_vec: Arc<Mutex<Vec<Block>>> = Arc::new(Mutex::new(Vec::new()));
+    let bvp_shared_root_placements_vec: Arc<Mutex<Vec<Placement>>> = Arc::new(Mutex::new(Vec::new()));
 
+    // Parse parameters and read input file.
     let parameters = arguments::parse_config(config_file_path)
         .map_err(|err| err.to_string())?;
 
-    let bvp_sharded_arc = Arc::new(BVPFile::new());
+    let raw_input_data = read_input_file(&parameters.input_file)?;
 
-    let mut zip_writer = StreamingZIPArchiveWriter::new(parameters.output_file)
+    // Initialize BVPFile instance (as much as we need to before going parallel).
+    let mut bvp = BVPFile::new();
+
+    // FIXME Not sure how this `format` works, used constant value
+    //       in `root_block_index` from sequential implementation.
+    let root_block_format_index: usize = 0;
+    let root_block_index = bvp.blocks.len();
+    let root_block = Block::new(
+        root_block_index,
+        parameters.dimensions,
+        Some(root_block_format_index),
+        Some(raw_input_data),
+    );
+
+    bvp.formats.push(parameters.input_format.clone());
+    bvp.blocks.push(root_block);
+
+    let bvp_arc = Arc::new(bvp);
+
+    // Initialize writer for ZIP files.
+    let mut zip_writer = StreamingZIPArchiveWriter::new(
+        parameters.output_file.clone()
+    )
         .map_err(|err| err.to_string())?;
 
+    // Spawn pipeline stages and wait for finish.
     scope(|scope| {
         // Stage 1
         spawn_stage_1(
             scope,
             stage_one_result_channel_tx,
-            bvp_sharded_arc.clone()
+            &parameters,
+            root_block_format_index,
         );
 
         // Stage 2
         spawn_stage_2(
+            STAGE_TWO_WORKER_COUNT,
             scope,
-            stage_one_result_channel_rx_arc.clone(),
-            stage_two_result_channel_tx_arc.clone(),
+            stage_one_result_channel_rx_arc,
+            stage_two_result_channel_tx_arc,
             bvp_shared_block_map.clone(),
             bvp_shared_block_vec.clone(),
-            bvp_sharded_arc.clone(),
+            bvp_shared_root_placements_vec.clone(),
+            bvp_arc.clone(),
             parameters.compression,
         );
 
@@ -552,16 +599,40 @@ fn raw_to_bvp_parallel(
             stage_two_result_channel_rx,
             &mut zip_writer,
         )?;
+
+        Ok::<(), String>(())
     })
-        .map_err(|err| String::from(err))?;
+        .map_err(|_| String::from("Scope failed to execute."))??;
 
-
-    let bvp_file = Arc::try_unwrap(bvp_sharded_arc)
+    // Unwrap `Arc`s and `Mutex`es that must at this point have only strong references and
+    // no other threads can access them.
+    let bvp_file = Arc::try_unwrap(bvp_arc)
         .expect("BUG: Something is holding a strong reference somehow.");
 
+    let bvp_block_map = Arc::try_unwrap(bvp_shared_block_map)
+        .expect("BUG: Something is still holding a strong reference.")
+        .into_inner()
+        .expect("Could not lock shared block map, some thread panicked while holding the lock.");
+
+    let bvp_block_vec = Arc::try_unwrap(bvp_shared_block_vec)
+        .expect("BUG: Something is still holding a strong reference.")
+        .into_inner()
+        .expect("Could not lock shared block vec, some thread panicked while holding the lock.");
+
+    let bvp_root_placements_vec = Arc::try_unwrap(bvp_shared_root_placements_vec)
+        .expect("BUG: Something is still holding a strong reference.")
+        .into_inner()
+        .expect("Could not lock shared root placements vec, some thread panicked while holding the lock.");
+
+    // Write the manifest and close the zip file writer.
     finalize_bvp_zip_file(
         zip_writer,
-        bvp_file
+        bvp_file,
+        bvp_block_map,
+        bvp_block_vec,
+        root_block_index,
+        bvp_root_placements_vec,
+        &parameters,
     )?;
 
     Ok(())
@@ -580,7 +651,20 @@ fn main() -> Result<(), String> {
         return Err("Missing JSON config file".to_string());
     }
 
-    raw_to_bvp_sequential(&arguments[1])?;
+    // let time_sequential_start = Instant::now();
+    // raw_to_bvp_sequential(&arguments[1])?;
+    // println!(
+    //     "Sequential execution time: {:.5}",
+    //     time_sequential_start.elapsed().as_secs_f64()
+    // );
+
+    // let time_parallel_start = Instant::now();
+    raw_to_bvp_parallel(&arguments[1])?;
+    // println!(
+    //     "Parallel execution time: {:.5}",
+    //     time_parallel_start.elapsed().as_secs_f64()
+    // );
 
     return Ok(());
 }
+

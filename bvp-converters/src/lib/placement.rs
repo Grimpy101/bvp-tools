@@ -4,6 +4,7 @@ use tinyjson::JsonValue;
 
 use crate::{vector3::Vector3, json_aux::get_u32_from_json, errors::{PlacementError, JsonError}};
 
+#[derive(Debug)]
 pub struct Placement {
     pub position: Vector3<u32>,
     pub block: usize

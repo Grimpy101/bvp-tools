@@ -4,6 +4,7 @@ use tinyjson::JsonValue;
 
 use crate::{errors::{AssetError, JsonError}, json_aux};
 
+#[derive(Debug)]
 pub struct Asset {
     pub version: String,
     pub name: Option<String>,

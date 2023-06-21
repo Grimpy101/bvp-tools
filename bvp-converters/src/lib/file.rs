@@ -1,14 +1,16 @@
-use std::{rc::Rc, path::Path, fs};
+use std::{path::Path, fs};
+use std::sync::Arc;
 
+#[derive(Debug)]
 pub struct File {
     pub name: String,
-    pub data: Rc<Vec<u8>>,
+    pub data: Arc<Vec<u8>>,
     pub mime: Option<String>
 }
 
 impl File {
-    pub fn new(name: String, data: Rc<Vec<u8>>, mime: Option<String>) -> Self {
-        return Self { name, data, mime };
+    pub fn new(name: String, data: Arc<Vec<u8>>, mime: Option<String>) -> Self {
+        Self { name, data, mime }
     }
 
     pub fn write(&self) -> Result<(), String> {

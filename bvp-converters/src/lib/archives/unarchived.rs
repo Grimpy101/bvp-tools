@@ -1,4 +1,5 @@
-use std::{path::Path, fs, str::FromStr, collections::HashMap, rc::Rc};
+use std::{path::Path, fs, str::FromStr, collections::HashMap};
+use std::sync::Arc;
 
 use tinyjson::JsonValue;
 
@@ -28,12 +29,12 @@ pub fn from_manifest_file(filepath: &Path) -> Result<Vec<File>, ArchiveError> {
             let data_path: String = block["data"].clone().try_into().map_err(|_| ArchiveError::NotValidFile("Invalid JSON".to_string()))?;
             let full_data_path = Path::new(filepath.parent().unwrap()).join(&data_path);
             let data_content = fs::read(&full_data_path).map_err(|x| ArchiveError::CannotRead(format!("Could not read file {} ({})", full_data_path.display(), x)))?;
-            let file = File::new(data_path, Rc::new(data_content), None);
+            let file = File::new(data_path, Arc::new(data_content), None);
             files.push(file);
         }
     }
 
-    let manifest_file = File::new(filepath.to_string_lossy().to_string(), Rc::new(manifest_contents), Some("application/json".to_string()));
+    let manifest_file = File::new(filepath.to_string_lossy().to_string(), Arc::new(manifest_contents), Some("application/json".to_string()));
     files.push(manifest_file);
 
     return Ok(files);

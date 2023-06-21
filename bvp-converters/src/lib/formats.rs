@@ -4,7 +4,7 @@ use tinyjson::JsonValue;
 
 use crate::{vector3::Vector3, json_aux::{get_string_from_json, get_u32_from_json}, errors::{FormatError, JsonError}};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum PrimitiveType {
     Int,
     Uint,
@@ -30,7 +30,7 @@ impl PrimitiveType {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MonoFormat {
     count: u32,
     tp: PrimitiveType,
@@ -64,7 +64,7 @@ impl MonoFormat {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum FormatFamily {
     Mono(MonoFormat)
 }
@@ -96,7 +96,7 @@ impl FormatFamily {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Format {
     pub microblock_dimensions: Vector3<u32>,
     pub microblock_size: u32,
