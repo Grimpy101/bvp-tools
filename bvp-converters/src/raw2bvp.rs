@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::thread::available_parallelism;
 use std::time::Instant;
 use crossbeam::{channel, scope};
 use crossbeam::channel::{Receiver, Sender};
@@ -524,7 +525,9 @@ fn finalize_bvp_zip_file(
 fn raw_to_bvp_parallel(
     config_file_path: &str
 ) -> Result<(), String> {
-    const STAGE_TWO_WORKER_COUNT: usize = 16;
+    let stage_two_worker_count: usize = available_parallelism()
+        .map_err(|err| err.to_string())?
+        .into();
 
     // Set up inter-stage channels/queues/maps/vectors.
     let (stage_one_result_channel_tx, stage_one_result_channel_rx) =
@@ -582,7 +585,7 @@ fn raw_to_bvp_parallel(
 
         // Stage 2
         spawn_stage_2(
-            STAGE_TWO_WORKER_COUNT,
+            stage_two_worker_count,
             scope,
             stage_one_result_channel_rx_arc,
             stage_two_result_channel_tx_arc,
@@ -658,12 +661,12 @@ fn main() -> Result<(), String> {
     //     time_sequential_start.elapsed().as_secs_f64()
     // );
 
-    // let time_parallel_start = Instant::now();
+    let time_parallel_start = Instant::now();
     raw_to_bvp_parallel(&arguments[1])?;
-    // println!(
-    //     "Parallel execution time: {:.5}",
-    //     time_parallel_start.elapsed().as_secs_f64()
-    // );
+    println!(
+        "Parallel execution time: {:.5}",
+        time_parallel_start.elapsed().as_secs_f64()
+    );
 
     return Ok(());
 }
