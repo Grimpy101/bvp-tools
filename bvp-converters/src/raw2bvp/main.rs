@@ -1,5 +1,7 @@
 use std::env;
 use std::time::Instant;
+use crate::parallel::raw_to_bvp_parallel;
+use crate::sequential::raw_to_bvp_sequential;
 
 pub mod sequential;
 pub mod parallel;
