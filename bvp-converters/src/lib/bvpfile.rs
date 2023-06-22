@@ -1,4 +1,4 @@
-use std::{collections::HashMap, str::FromStr};
+use std::{collections::{HashMap, HashSet}, str::FromStr};
 
 use tinyjson::{JsonValue};
 
@@ -25,8 +25,8 @@ impl BVPFile {
             copyright: None,
             acquisition_time: None,
             creation_time: None,
-            extensions_required: None,
-            extensions_used: None
+            extensions_required: Vec::new(),
+            extensions_used: Vec::new()
         };
         let modalities = Vec::new();
         let blocks = Vec::new();
@@ -44,13 +44,16 @@ impl BVPFile {
     }
 
     pub fn to_manifest(&self) -> Result<Vec<u8>, String> {
-        let asset = self.asset.to_json();
         let mut formats = Vec::new();
         let mut modalities = Vec::new();
         let mut blocks = Vec::new();
+        let mut extensions = HashSet::new();
 
         for format in &self.formats {
             formats.push(format.to_json().into());
+            if format.extension.is_some() {
+                extensions.insert(format.extension.unwrap());
+            }
         }
         for modality in &self.modalities {
             modalities.push(modality.to_json());
@@ -59,6 +62,7 @@ impl BVPFile {
             blocks.push(block.to_json());
         }
 
+        let asset = self.asset.to_json(extensions);
         let mut manifest = HashMap::new();
         manifest.insert("asset".to_string(), asset);
         manifest.insert("formats".to_string(), formats.into());
