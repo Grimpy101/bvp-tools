@@ -116,12 +116,16 @@ fn main() -> Result<(), String> {
     let bvp_state = get_bvp_state(files)?;
 
     let mut name_index = 0;
+    let mut errors = Vec::new();
     for modality in &bvp_state.modalities {
         let root_block_index = modality.block;
         let root_block = &bvp_state.blocks[root_block_index];
         let format = match find_format(&bvp_state, root_block_index) {
             Ok(format_index) => format_index,
-            Err(e) => return Err(e)
+            Err(e) => {
+                errors.push(e.to_string());
+                continue;
+            }
         };
         let root_volume_size = format.count_space(root_block.dimensions);
         let mut root_data = Vec::with_capacity(root_volume_size as usize);
@@ -134,7 +138,8 @@ fn main() -> Result<(), String> {
 
         let res = populate_volume(&bvp_state, root_block_index, &mut new_block, format);
         if res.is_err() {
-            return res;
+            errors.push(res.unwrap_err().to_string());
+            continue;
         }
         
         let volume_name = match modality.name.clone() {
@@ -156,13 +161,23 @@ fn main() -> Result<(), String> {
 
         match fs::write(volume_name, new_block.data.unwrap()) {
             Ok(()) => (),
-            Err(_) => {
-                // TODO: Add some error reporting
-                break;
+            Err(e) => {
+                errors.push(e.to_string());
+                continue;
             }
         };
 
         name_index += 1;
+    }
+
+    if errors.len() > 0 {
+        let mut message = "Finished with the following errors: ".to_string();
+
+        for error in errors {
+            message = format!("{}\n{}", message, error);
+        }
+
+        return Err(message);
     }
 
     return Ok(());
