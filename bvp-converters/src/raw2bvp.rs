@@ -128,7 +128,7 @@ fn main() -> Result<(), String> {
     volume2block(0, parameters.dimensions, parameters.block_dimensions, root_block_index, parameters.compression, &mut bvp_file)?;
     
     let time = chrono::offset::Utc::now();
-    bvp_file.asset.creation_time = Some(time.timestamp().to_string()); // IN ISO format!!!
+    bvp_file.asset.creation_time = Some(time.to_rfc3339());
     bvp_file.files.push(File::new("manifest.json".to_string(), Rc::new(bvp_file.to_manifest()?), Some("application/json".to_string())));
     
     parameters.archive.write_files(&bvp_file.files, parameters.output_file).map_err(|x| format!("{}", x))?;
