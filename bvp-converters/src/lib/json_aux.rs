@@ -41,3 +41,19 @@ pub fn get_array_from_json(j: &JsonValue) -> Result<Vec<JsonValue>, JsonError> {
         _ => return Err(JsonError::NotAnArray(j.clone()))
     }
 }
+
+pub fn get_string_vec_from_json(j: &JsonValue) -> Result<Vec<String>, JsonError> {
+    let mut vec = Vec::new();
+    match j {
+        JsonValue::Array(a) => {
+            for el in a {
+                match el {
+                    JsonValue::String(s) => vec.push(s.clone()),
+                    _ => return Err(JsonError::NotAString(el.clone()))
+                }
+            }
+        },
+        _ => return Err(JsonError::NotAnArray(j.clone()))
+    }
+    return Ok(vec);
+}

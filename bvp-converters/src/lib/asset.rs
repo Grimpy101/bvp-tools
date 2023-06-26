@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use tinyjson::JsonValue;
 
-use crate::{errors::{AssetError, JsonError}, json_aux};
+use crate::{errors::{AssetError, JsonError}, json_aux, extensions::Extension};
 
 #[derive(Debug)]
 pub struct Asset {
@@ -14,12 +14,12 @@ pub struct Asset {
     pub copyright: Option<String>,
     pub acquisition_time: Option<String>,
     pub creation_time: Option<String>,
-    pub extensions_used: Option<Vec<String>>,
-    pub extensions_required: Option<Vec<String>>
+    pub extensions_used: Vec<String>,
+    pub extensions_required: Vec<String>
 }
 
 impl Asset {
-    pub fn to_json(&self) -> JsonValue {
+    pub fn to_json(&self, ext: HashSet<Extension>) -> JsonValue {
         let mut hm = HashMap::new();
         hm.insert("version".to_string(), self.version.clone().into());
         if self.name.is_some() {
@@ -42,6 +42,16 @@ impl Asset {
         }
         if self.creation_time.is_some() {
             hm.insert("creationTime".to_string(), self.creation_time.as_ref().unwrap().clone().into());
+        }
+        if ext.len() > 0 {
+            let mut ext_used: Vec<JsonValue> = Vec::new();
+            let mut ext_req: Vec<JsonValue> = Vec::new();
+            for e in &ext {
+                ext_used.push(e.to_string().into());
+                ext_req.push(e.to_string().into());
+            }
+            hm.insert("extensionsUsed".to_string(), ext_used.into());
+            hm.insert("extensionsRequired".to_string(), ext_req.into());
         }
         return hm.into();
     }
@@ -120,9 +130,17 @@ impl Asset {
             },
             None => None
         };
+        let mut extensions_required = Vec::new();
+        if hashmap.get("extensionsRequired").is_some() {
+            extensions_required = json_aux::get_string_vec_from_json(&hashmap["extensionsRequired"]).map_err(|x| AssetError::InvalidJson(x))?;
+        }
+        let mut extensions_used = Vec::new();
+        if hashmap.get("extensionsUsed").is_some() {
+            extensions_used = json_aux::get_string_vec_from_json(&hashmap["extensionsUsed"]).map_err(|x| AssetError::InvalidJson(x))?;
+        }
         let asset = Asset {
             version, name, generator, author, description, copyright, acquisition_time,
-            creation_time, extensions_required: None, extensions_used: None
+            creation_time, extensions_required, extensions_used
         };
         return Ok(asset);
     }
