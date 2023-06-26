@@ -1,4 +1,5 @@
-use std::{collections::HashMap, io::{Read}, str::FromStr, rc::Rc};
+use std::{collections::HashMap, io::{Read}, str::FromStr};
+use std::sync::Arc;
 use tinyjson::JsonValue;
 
 use crate::{file::File, errors::SafError};
@@ -133,7 +134,7 @@ pub fn from_saf_archive(saf: &Vec<u8>) -> Result<Vec<File>, SafError> {
                     Err(e) => return Err(SafError::InvalidJson(e))
                 };
                 let data = saf[offset..offset+size].to_vec();
-                let file = File::new(path, Rc::new(data), Some(mime));
+                let file = File::new(path, Arc::new(data), Some(mime));
                 files.push(file);
                 offset += size;
             },

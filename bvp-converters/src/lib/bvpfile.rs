@@ -5,6 +5,7 @@ use tinyjson::{JsonValue};
 use crate::{block::Block, formats::Format, asset::Asset, modality::Modality, file::File, errors::{BvpFileError, JsonError}};
 
 
+#[derive(Debug)]
 pub struct BVPFile {
     pub asset: Asset,
     pub modalities: Vec<Modality>,

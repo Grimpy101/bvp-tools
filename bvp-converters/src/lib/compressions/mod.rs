@@ -2,7 +2,7 @@ use crate::errors::CompressionError;
 
 pub mod lz4s;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum CompressionType {
     None,
     LZ4S

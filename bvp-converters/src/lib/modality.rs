@@ -4,6 +4,7 @@ use tinyjson::JsonValue;
 
 use crate::{vector3::Vector3, errors::{ModalityError, JsonError}, json_aux};
 
+#[derive(Debug)]
 pub struct Modality {
     pub name: Option<String>,
     description: Option<String>,
