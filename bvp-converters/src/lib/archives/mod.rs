@@ -19,43 +19,6 @@ pub enum ArchiveEnum {
 }
 
 impl ArchiveEnum {
-    /// Takes the type of archive to use and writes files.
-    /// * `files` - a vector of files to write
-    /// * `output_filepath` - a filepath to write to; should be a file in case of archive or a folder in case of unarchived output
-    pub fn write_files(&self, files: &Vec<File>, output_filepath: String) -> Result<(), ArchiveError> {
-        match self {
-            Self::SAF => {
-                let saf = match saf::to_saf_archive(files) {
-                    Ok(s) => s,
-                    Err(e) => return Err(ArchiveError::SafError(e))
-                };
-                match fs::write(output_filepath, saf) {
-                    Ok(_) => (),
-                    Err(e) => return Err(ArchiveError::CannotWrite(e.to_string()))
-                };
-            },
-            Self::ZIP => {
-                let zip = match zip::to_zip_archive(files) {
-                    Ok(z) => z,
-                    Err(e) => return Err(ArchiveError::ZipError(e))
-                };
-                match fs::write(output_filepath, zip) {
-                    Ok(_) => (),
-                    Err(e) => return Err(ArchiveError::CannotWrite(e.to_string()))
-                }
-            },
-            Self::None => {
-                for file in files {
-                    match file.write() {
-                        Ok(_) => (),
-                        Err(e) => return Err(ArchiveError::CannotWrite(e.to_string()))
-                    };
-                }
-            }
-        };
-        return Ok(());
-    }
-
     pub fn return_writer(&self) -> Box<dyn ArchiveWriter + Send> {
         match self {
             Self::SAF => {

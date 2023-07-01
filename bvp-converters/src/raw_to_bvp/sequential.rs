@@ -1,4 +1,4 @@
-use std::sync::Arc;
+/*use std::sync::Arc;
 use xxhash_rust::xxh3;
 use bvp::block::Block;
 use bvp::bvpfile::BVPFile;
@@ -120,3 +120,4 @@ pub fn raw_to_bvp_sequential(
 
     Ok(())
 }
+*/
