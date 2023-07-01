@@ -1,6 +1,6 @@
 use std::hash::Hash;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum Extension {
     ExtFormatMono
 }

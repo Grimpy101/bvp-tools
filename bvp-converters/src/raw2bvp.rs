@@ -2,9 +2,8 @@ mod raw_to_bvp;
 mod arguments;
 
 use std::env;
-use std::time::Instant;
 
-use crate::raw_to_bvp::{raw_to_bvp_parallel, raw_to_bvp_sequential};
+use crate::raw_to_bvp::{raw_to_bvp_parallel};
 
 
 fn main() -> Result<(), String> {

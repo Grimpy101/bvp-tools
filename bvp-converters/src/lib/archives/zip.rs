@@ -1,8 +1,10 @@
-use std::sync::Arc;
+use std::{sync::Arc, fs};
 
 use chrono::{Datelike, Timelike};
 
 use crate::{file::File, errors::ZipError};
+
+use super::ArchiveWriter;
 
 static LOCAL_FILE_HEADER_SIG: u32 = 0x04034b50;
 static CENTRAL_DIR_FILE_HEADER_SIG: u32 = 0x02014b50;
@@ -108,6 +110,68 @@ impl CentralDirectoryHeader {
             &extra_bytes,
             &comment_bytes
         ].concat();
+    }
+}
+
+pub struct ZIPWriter {
+    file_contents: Vec<u8>,
+    central_file_headers: Vec<CentralDirectoryHeader>
+}
+
+impl ZIPWriter {
+    pub fn new() -> Self {
+        return Self {
+            file_contents: Vec::new(),
+            central_file_headers: Vec::new()
+        };
+    }
+}
+
+impl ArchiveWriter for ZIPWriter {
+    fn append_file(&mut self, file: &File) -> Result<(), String> {
+        let offset = self.file_contents.len() as u32;
+        let file_header = CentralDirectoryHeader::simple_new(file, offset);
+
+        self.file_contents.append(&mut file_header.file_header_bytes());
+        for d in file.data.iter() {
+            self.file_contents.push(*d);
+        }
+        self.central_file_headers.push(file_header);
+
+        return Ok(());
+    }
+
+    fn finish(&self, path: String) -> Result<(), String> {
+        let zip_size = self.file_contents.len();
+        let mut zip = Vec::with_capacity(zip_size);
+        for el in &self.file_contents {
+            zip.push(*el);
+        }
+
+        let mut central_dir_size = 0;
+        let central_dir_offset = zip.len();
+        for file_header in &self.central_file_headers {
+            let mut central_dir_file_header = file_header.central_dir_file_header();
+            central_dir_size += central_dir_file_header.len();
+            zip.append(&mut central_dir_file_header);
+        }
+
+        let mut eocd = [
+            &EOCD_SIG.to_le_bytes() as &[u8],
+            &1u16.to_le_bytes() as &[u8],
+            &1u16.to_le_bytes() as &[u8],
+            &(self.central_file_headers.len() as u16).to_le_bytes() as &[u8],
+            &(self.central_file_headers.len() as u16).to_le_bytes() as &[u8],
+            &(central_dir_size as u32).to_le_bytes() as &[u8],
+            &(central_dir_offset as u32).to_le_bytes() as &[u8],
+            &0u16.to_le_bytes() as &[u8]
+        ].concat();
+
+        zip.append(&mut eocd);
+
+        fs::write(path, zip.as_slice()).map_err(|err| err.to_string())?;
+        
+        return Ok(());
     }
 }
 

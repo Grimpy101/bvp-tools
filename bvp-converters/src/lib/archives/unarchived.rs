@@ -5,6 +5,39 @@ use tinyjson::JsonValue;
 
 use crate::{errors::{ArchiveError}, file::File};
 
+use super::ArchiveWriter;
+
+pub struct RawFilesWriter {
+
+}
+
+impl RawFilesWriter {
+    pub fn new() -> Self {
+        return Self {  };
+    }
+}
+
+impl ArchiveWriter for RawFilesWriter {
+    fn append_file(&mut self, file: &File) -> Result<(), String> {
+        let path = Path::new(&file.name);
+        if path.parent().is_some() {
+            let parent = path.parent().unwrap();
+            if !parent.try_exists().expect("Error: Cannot determine if folder exists") {
+                fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+            } else if parent.is_file() {
+                return Err("Destination folder is a file!".to_string());
+            }
+        }
+
+        fs::write(path, file.data.as_slice()).map_err(|err| err.to_string())?;
+        return Ok(());
+    }
+
+    fn finish(&self, _path: String) -> Result<(), String> {
+        return Ok(());
+    }
+}
+
 pub fn from_manifest_file(filepath: &Path) -> Result<Vec<File>, ArchiveError> {
     let mut files = Vec::new();
 

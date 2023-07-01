@@ -1,17 +1,13 @@
 use std::collections::HashMap;
-use std::fs;
-use std::io::Write;
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread::available_parallelism;
 
+use bvp::archives::ArchiveWriter;
 use crossbeam::{channel, scope};
 use crossbeam::channel::{Receiver, Sender};
 use crossbeam::thread::Scope;
 use itertools::iproduct;
 use xxhash_rust::xxh3;
-use zip::{CompressionMethod, ZipWriter};
-use zip::write::FileOptions;
 
 use bvp::block::Block;
 use bvp::bvpfile::BVPFile;
@@ -250,74 +246,13 @@ fn spawn_stage_2<'scope, 'scope_env: 'scope>(
 /*
  * Stage 3
  */
-pub struct StreamingZIPArchiveWriter {
-    zip_writer: ZipWriter<fs::File>,
-}
-
-impl StreamingZIPArchiveWriter {
-    pub fn new<P: AsRef<Path>>(output_file_path: P) -> Result<Self, String> {
-        let output_file = fs::File::create(output_file_path.as_ref())
-            .map_err(|e| e.to_string())?;
-
-        let mut zip_writer = ZipWriter::new(output_file);
-
-        zip_writer.add_directory(
-            "blocks",
-            FileOptions::default()
-                .compression_method(CompressionMethod::Stored),
-        )
-            .map_err(|err| err.to_string())?;
-
-        Ok(Self {
-            zip_writer,
-        })
-    }
-
-    fn append_block_file(&mut self, file: File) -> Result<(), String> {
-        self.zip_writer.start_file(
-            file.name,
-            FileOptions::default()
-                .compression_method(CompressionMethod::Stored),
-        )
-            .map_err(|err| err.to_string())?;
-
-        self.zip_writer
-            .write_all(file.data.as_slice())
-            .map_err(|err| err.to_string())?;
-
-        Ok(())
-    }
-
-    fn finish(mut self, manifest_file: File) -> Result<(), String> {
-        self.zip_writer.start_file(
-            manifest_file.name,
-            FileOptions::default()
-                .compression_method(CompressionMethod::Stored),
-        )
-            .map_err(|err| err.to_string())?;
-
-        self.zip_writer
-            .write_all(manifest_file.data.as_slice())
-            .map_err(|err| err.to_string())?;
-
-        let mut inner_file = self.zip_writer
-            .finish()
-            .map_err(|err| err.to_string())?;
-
-        inner_file.flush()
-            .map_err(|err| err.to_string())?;
-
-        Ok(())
-    }
-}
-
 /// Run a worker for the stage three of the pipeline.
 ///
 /// This stage receives parsed data blocks from the second stage and
 /// writes them into the .bvp (ZIP) file.
 fn run_stage_3_worker(
     stage_two_result_queue_rx: Receiver<StageTwoPipelineResult>,
-    zip_writer: &mut StreamingZIPArchiveWriter,
+    writer: &mut Box<dyn ArchiveWriter + Send>,
 ) -> Result<(), String> {
     // Receive queued files to write and write them to disk as the requests are coming in.
     loop {
@@ -330,8 +265,7 @@ fn run_stage_3_worker(
             }
         };
 
-        zip_writer
-            .append_block_file(stage_two_work.file_to_write)?;
+        writer.append_file(&stage_two_work.file_to_write)?;
     }
 
     Ok(())
@@ -340,15 +274,15 @@ fn run_stage_3_worker(
 /// Spawn stage three worker for the pipeline.
 ///
 /// See `run_stage_3_worker` for more information.
-fn spawn_stage_3<'zip_writer: 'scope_env, 'scope, 'scope_env: 'scope>(
+fn spawn_stage_3<'writer: 'scope_env, 'scope, 'scope_env: 'scope>(
     scope: &'scope Scope<'scope_env>,
     stage_two_result_queue_rx: Receiver<StageTwoPipelineResult>,
-    zip_writer: &'zip_writer mut StreamingZIPArchiveWriter,
+    writer: &'writer mut Box<dyn ArchiveWriter + Send>,
 ) -> Result<(), String> {
     scope.spawn(move |_| {
         run_stage_3_worker(
             stage_two_result_queue_rx,
-            zip_writer,
+            writer,
         )
     });
 
@@ -360,8 +294,8 @@ fn spawn_stage_3<'zip_writer: 'scope_env, 'scope, 'scope_env: 'scope>(
  * Other
  */
 
-fn finalize_bvp_zip_file(
-    zip_writer: StreamingZIPArchiveWriter,
+fn finalize_bvp_file(
+    writer: &mut Box<dyn ArchiveWriter + Send>,
     mut bvp_file: BVPFile,
     bvp_block_map: HashMap<u64, usize>,
     bvp_block_vec: Vec<Block>,
@@ -386,7 +320,7 @@ fn finalize_bvp_zip_file(
     bvp_file.asset.description = parameters.description.clone();
 
     let time = chrono::offset::Utc::now();
-    bvp_file.asset.creation_time = Some(time.timestamp().to_string()); // IN ISO format!!!
+    bvp_file.asset.creation_time = Some(time.to_rfc3339());
 
     bvp_file.block_map = bvp_block_map;
     bvp_file.blocks.extend(bvp_block_vec);
@@ -400,7 +334,8 @@ fn finalize_bvp_zip_file(
         Some("application/json".to_string()),
     );
 
-    zip_writer.finish(manifest_file)?;
+    writer.append_file(&manifest_file)?;
+    writer.finish(parameters.output_file.clone())?;
 
     Ok(())
 }
@@ -459,10 +394,7 @@ pub fn raw_to_bvp_parallel(
     let bvp_arc = Arc::new(bvp);
 
     // Initialize writer for ZIP files.
-    let mut zip_writer = StreamingZIPArchiveWriter::new(
-        parameters.output_file.clone()
-    )
-        .map_err(|err| err.to_string())?;
+    let mut writer = parameters.archive.return_writer();
 
     // Spawn pipeline stages and wait for finish.
     // Pipeline is made out of three stages:
@@ -500,7 +432,7 @@ pub fn raw_to_bvp_parallel(
         spawn_stage_3(
             scope,
             stage_two_result_channel_rx,
-            &mut zip_writer,
+            &mut writer,
         )?;
 
         Ok::<(), String>(())
@@ -529,8 +461,8 @@ pub fn raw_to_bvp_parallel(
         .expect("Could not lock shared root placements vec, some thread panicked while holding the lock.");
 
     // Finalize BVPFile, generate and write the manifest and close the zip file writer.
-    finalize_bvp_zip_file(
-        zip_writer,
+    finalize_bvp_file(
+        &mut writer,
         bvp_file,
         bvp_block_map,
         bvp_block_vec,

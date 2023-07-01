@@ -1,9 +1,16 @@
 use std::{fs, path::Path};
 use crate::{file::File, errors::ArchiveError};
 
+use self::{saf::SAFWriter, zip::ZIPWriter, unarchived::RawFilesWriter};
+
 pub mod saf;
 pub mod zip;
 pub mod unarchived;
+
+pub trait ArchiveWriter {
+    fn append_file(&mut self, file: &File) -> Result<(), String>;
+    fn finish(&self, path: String) -> Result<(), String>;
+}
 
 pub enum ArchiveEnum {
     SAF,
@@ -47,6 +54,20 @@ impl ArchiveEnum {
             }
         };
         return Ok(());
+    }
+
+    pub fn return_writer(&self) -> Box<dyn ArchiveWriter + Send> {
+        match self {
+            Self::SAF => {
+                return Box::new(SAFWriter::new());
+            },
+            Self::ZIP => {
+                return Box::new(ZIPWriter::new());
+            },
+            Self::None => {
+                return Box::new(RawFilesWriter::new());
+            }
+        }
     }
 
     pub fn from_string(str: String) -> Result<Self, ArchiveError> {

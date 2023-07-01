@@ -1,12 +1,97 @@
-use std::{collections::HashMap, io::{Read}, str::FromStr};
+use std::{collections::HashMap, io::{Read}, str::FromStr, fs};
 use std::sync::Arc;
 use tinyjson::JsonValue;
 
-use crate::{file::File, errors::SafError};
+use crate::{file::File, errors::{SafError}};
 use crate::json_aux;
+
+use super::ArchiveWriter;
 
 const SAF_IDENTIFIER_LENGTH: usize = 12;
 const SAF_IDENTIFIER: [u8; 12] = [0xab, 0x53, 0x41, 0x46, 0x20, 0x31, 0x30, 0xbb, 0x0d, 0x0a, 0x1a, 0x0a];
+
+struct SAFFileEntry {
+    path: String,
+    mime: Option<String>,
+    size: usize
+}
+
+impl SAFFileEntry {
+    pub fn as_json(&self) -> JsonValue {
+        let mut hm = HashMap::new();
+        hm.insert("path".to_string(), self.path.clone().into());
+        if self.mime.is_some() {
+            hm.insert("mime".to_string(), self.mime.clone().unwrap().into());
+        }
+        hm.insert("size".to_string(), (self.size as f64).into());
+        return hm.into();
+    }
+}
+
+pub struct SAFWriter {
+    file_content: Vec<u8>,
+    file_metadata: Vec<SAFFileEntry>
+}
+
+impl SAFWriter {
+    pub fn new() -> Self {
+        return Self {
+            file_content: Vec::new(),
+            file_metadata: Vec::new()
+        };
+    }
+}
+
+impl ArchiveWriter for SAFWriter {
+    fn append_file(&mut self, file: &File) -> Result<(), String> {
+        let file_entry = SAFFileEntry {
+            path: file.name.clone(),
+            mime: file.mime.clone(),
+            size: file.data.len()
+        };
+        for el in file.data.as_ref() {
+            self.file_content.push(*el);
+        }
+        self.file_metadata.push(file_entry);
+
+        return Ok(());
+    }
+
+    fn finish(&self, path: String) -> Result<(), String> {
+        let mut manifest = Vec::new();
+        for file in &self.file_metadata {
+            manifest.push(file.as_json());
+        }
+        let json: JsonValue = manifest.into();
+        let text = match json.stringify() {
+            Ok(t) => t,
+            Err(e) => {
+                return Err(e.to_string());
+            },
+        };
+        let manifest_buffer = text.as_bytes();
+        let manifest_size = manifest_buffer.len();
+        let manifest_size_buffer = (manifest_size as u32).to_le_bytes();
+        let saf_size = SAF_IDENTIFIER_LENGTH + manifest_size_buffer.len() + manifest_buffer.len() + self.file_metadata.iter().map(|e| e.size).sum::<usize>();
+        let mut saf: Vec<u8> = Vec::with_capacity(saf_size);
+        for i in SAF_IDENTIFIER {
+            saf.push(i);
+        }
+        for i in manifest_size_buffer {
+            saf.push(i);
+        }
+        for i in manifest_buffer {
+            saf.push(*i);
+        }
+        for el in &self.file_content {
+            saf.push(*el);
+        }
+
+        fs::write(path, saf.as_slice()).map_err(|err| err.to_string())?;
+    
+        return Ok(());
+    }
+}
 
 /// Checks if provided data has a valid SAF identifier.
 /// * `data` - raw bytes as vector of u8
